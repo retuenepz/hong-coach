@@ -5,3 +5,10 @@ spring:
   ai:
     dashscope:
       api-key: sk-6c151a6b56864a038730f90233030a46
+
+
+engine:
+  path: C:\Users\test\Desktop\pika\20260131
+  movetime: 200
+  nnue-file-name: pikafish.nnue
+  exe-file-name: pikafish-avx2.exe
