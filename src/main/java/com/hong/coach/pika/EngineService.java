@@ -85,7 +85,7 @@ public class EngineService {
     }
 
     private void send(String cmd) throws IOException {
-        log.debug("send to pika:" + cmd);
+        log.info("send to pika:" + cmd);
         stdin.write(cmd);
         stdin.write("\n");
         stdin.flush();
@@ -97,7 +97,7 @@ public class EngineService {
             String line;
             try {
                 while ((line = stdout.readLine()) != null) {
-                    log.debug("pikaout:" + line);
+                    log.info("pikaout:" + line);
                     if (line.startsWith("bestmove")) {
                         q.offer(line);
                         break;

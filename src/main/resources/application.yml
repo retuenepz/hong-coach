@@ -5,7 +5,16 @@ spring:
   ai:
     dashscope:
       api-key: sk-6c151a6b56864a038730f90233030a46
+  application:
+    name: hong-coach
 
+logging:
+  file:
+    path: logs
+  level:
+    root: INFO
+    com.hong.coach.pika: DEBUG
+    com.hong.coach: INFO
 
 engine:
   path: C:\Users\test\Desktop\pika\20260131
