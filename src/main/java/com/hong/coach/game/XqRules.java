@@ -6,18 +6,13 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Single-file Chinese Chess rules engine:
- * - 10x9 coordinates: row 0 at top (Black baseline), row 9 at bottom (Red baseline), col 0..8 left to right
- * - Red moves upward (dir = -1), Black moves downward (dir = +1)
- * - Each piece class implements its own "pseudo-legal moves" (without considering check/face-to-face); Board will uniformly filter:
- *   1) Cannot capture own pieces
- *   2) Cannot have generals face each other after move
- *   3) Cannot be in check after move
+ * 象棋走子基本规则
  */
 public class XqRules {
 
-    /* ===================== Basic Types ===================== */
-
+    /**
+     * 红方/黑方
+     */
     public enum Side {
         RED(-1),   // Red at bottom, moves upward
         BLACK(+1); // Black at top, moves downward
@@ -32,12 +27,15 @@ public class XqRules {
         }
     }
 
+    /**
+     * 棋子枚举
+     */
     public enum PieceType {
         GENERAL, ADVISOR, ELEPHANT, HORSE, ROOK, CANNON, PAWN
     }
 
     /**
-     * Position coordinates
+     * 坐标
      */
     public static final class Pos {
         public final int r, c;
@@ -66,7 +64,7 @@ public class XqRules {
     }
 
     /**
-     * Move
+     * 移动
      */
     public static final class Move {
         public final Pos from, to;
@@ -82,7 +80,7 @@ public class XqRules {
         }
     }
 
-    /* ===================== Piece Base Class ===================== */
+    /* 棋子类 */
 
     public static abstract class Piece {
         public final PieceType type;
@@ -126,7 +124,7 @@ public class XqRules {
     /* ===================== Piece Rules ===================== */
 
     /**
-     * Rook: moves orthogonally, stops at first piece; can capture enemies
+     * Rook: 车
      */
     public static final class Rook extends Piece {
         public Rook(Side s, Pos p) {
@@ -153,7 +151,7 @@ public class XqRules {
     }
 
     /**
-     * Cannon: moves orthogonally; must jump over exactly one piece to capture; cannot jump when not capturing
+     * Cannon: 炮
      */
     public static final class Cannon extends Piece {
         public Cannon(Side s, Pos p) {
@@ -186,7 +184,7 @@ public class XqRules {
     }
 
     /**
-     * Horse: knight moves; blocked if adjacent "leg" position is occupied
+     * Horse: 马
      */
     public static final class Horse extends Piece {
         public Horse(Side s, Pos p) {
@@ -214,7 +212,7 @@ public class XqRules {
     }
 
     /**
-     * Elephant: moves diagonally two squares; cannot cross river; blocked if center is occupied
+     * Elephant: 象
      */
     public static final class Elephant extends Piece {
         public Elephant(Side s, Pos p) {
@@ -238,7 +236,7 @@ public class XqRules {
     }
 
     /**
-     * Advisor: moves one square diagonally within palace
+     * Advisor: 士
      */
     public static final class Advisor extends Piece {
         public Advisor(Side s, Pos p) {
@@ -258,7 +256,7 @@ public class XqRules {
     }
 
     /**
-     * General: moves one square orthogonally within palace; can capture enemy general if aligned with no pieces between; cannot face each other
+     * General: 将/帅
      */
     public static final class General extends Piece {
         public General(Side s, Pos p) {
@@ -285,7 +283,7 @@ public class XqRules {
     }
 
     /**
-     * Pawn: moves forward one square before crossing river; can move sideways after crossing river; never moves backward
+     * Pawn: 兵/卒
      */
     public static final class Pawn extends Piece {
         public Pawn(Side s, Pos p) {
@@ -310,8 +308,9 @@ public class XqRules {
         }
     }
 
-    /* ===================== Board and Legality ===================== */
-
+    /**
+     * 棋盘
+     */
     public static final class Board {
         private final Piece[][] grid = new Piece[10][9];
 
@@ -396,7 +395,7 @@ public class XqRules {
         }
 
         /**
-         * Check if generals face each other (illegal position)
+         * 检测老将是否对脸
          */
         public boolean generalsFacing() {
             Pos r = findGeneral(Side.RED), k = findGeneral(Side.BLACK);
@@ -406,7 +405,7 @@ public class XqRules {
         }
 
         /**
-         * Simulate move (without validation)
+         * 移动棋子
          */
         public Board makeMove(Move m) {
             Board nb = this.cloneBoard();
@@ -417,12 +416,12 @@ public class XqRules {
         }
 
         /**
-         * Check if own side is in check
+         * 检测是否被将军
          */
         public boolean inCheck(Side side) {
             Pos g = findGeneral(side);
             if (g == null) return false;
-            // Enumerate all enemy pseudo-legal moves to see if they can reach our general
+            // 枚举所有地方棋子的合法移动 检测将军
             for (int r = 0; r < 10; r++)
                 for (int c = 0; c < 9; c++) {
                     Piece q = grid[r][c];
@@ -436,7 +435,9 @@ public class XqRules {
         }
 
         /**
-         * Final legal moves for a piece (filtered for self-check/face-to-face)
+         * 找出给定位置的棋子所有合法的走法
+         * 1.走完之后不能老将对脸
+         * 2.走完之后不能老将被吃
          */
         public List<Move> legalMovesAt(Pos from) {
             Piece p = at(from.r, from.c);
@@ -452,7 +453,7 @@ public class XqRules {
         }
 
         /**
-         * Clone board
+         * 复制棋盘
          */
         public Board cloneBoard() {
             Board b = new Board();

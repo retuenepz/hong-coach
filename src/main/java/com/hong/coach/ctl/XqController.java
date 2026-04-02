@@ -69,7 +69,7 @@ public class XqController {
     public Map<String, Object> playerMove(@RequestBody Map<String, Integer> move) throws Exception {
         Map<String, Object> resp = new HashMap<>();
 
-        // Check if game has ended
+        // 是不是已经结束了 将死了还走个屁
         if (gameOver) {
             resp.put("result", "game_over");
             resp.put("gameResult", gameResult);
@@ -136,8 +136,8 @@ public class XqController {
         moveHistory.add(playerMoveUci);
         turn = turn.opponent();
 
-        // New: check stalemate (no legal moves)
-        if (isStalemate(board, turn)) {
+        // 检测是否已经将死
+        if (isCheckMate(board, turn)) {
             gameOver = true;
             winner = turn.opponent().toString(); // Opponent wins
             gameResult = turn.opponent() == Side.RED ? "Red wins (stalemate)" : "Black wins (stalemate)";
@@ -149,7 +149,7 @@ public class XqController {
             return resp;
         }
 
-        // Check game state after player move
+        // 走子之后 再次检测棋盘盘面状态
         XqPlayJuge.GameResult gameState = checkGameState();
         if (gameState != XqPlayJuge.GameResult.IN_PROGRESS) {
             handleGameEnd(gameState, resp);
@@ -157,22 +157,22 @@ public class XqController {
             return resp;
         }
 
-        // 3) Let Pikafish make a move on current position
+        // pikafish 分析一个bestMove
         String bestMoveUci = engine.bestMove(null, moveHistory);
 
-        // 4) Apply AI move to our rule board
+        // 执行一下bestMove 修改盘面
         if (bestMoveUci != null && !bestMoveUci.isEmpty()) {
             Move aiMove = parseUci(bestMoveUci);
             if (aiMove != null) {
                 Board aiBoard = board.makeMove(aiMove);
 
-                // New: check position repetition after AI move
+                // 长将检测
                 String aiPosition = getBoardPosition(aiBoard, turn);
                 int aiRepeatCount = positionCounts.getOrDefault(aiPosition, 0) + 1;
                 positionCounts.put(aiPosition, aiRepeatCount);
 
                 if (aiRepeatCount >= 5) {
-                    // AI perpetual check, player wins
+                    // 长将算输
                     gameOver = true;
                     winner = Side.RED.toString(); // Player plays red
                     gameResult = "Red wins (AI perpetual check)";
@@ -190,7 +190,7 @@ public class XqController {
             }
         }
 
-        // 5) Check game state after AI move
+        // 盘面检测
         gameState = checkGameState();
         if (gameState != XqPlayJuge.GameResult.IN_PROGRESS) {
             handleGameEnd(gameState, resp);
@@ -199,14 +199,14 @@ public class XqController {
             return resp;
         }
 
-        // 6) Return to frontend for update
+        // 返回前端
         resp.put("result", "ok");
         resp.put("playerMove", playerMoveUci);
         resp.put("aiMove", bestMoveUci != null ? bestMoveUci : "");
         resp.put("foulCount", foulCount);
         resp.put("isRepeatedMove", isRepeatedMove);
 
-        // Add check state information
+        // 返回将军的信息
         boolean playerInCheck = XqPlayJuge.isInCheck(board, Side.RED);  // Player plays red
         boolean aiInCheck = XqPlayJuge.isInCheck(board, Side.BLACK);
         resp.put("meInCheck", playerInCheck);
@@ -215,8 +215,11 @@ public class XqController {
         return resp;
     }
 
-    /** New: Check stalemate (no legal moves) */
-    private boolean isStalemate(Board board, Side side) {
+    /**
+     * 检测还有没有棋可以走
+     * 没棋走了 要么就是绝杀/要么困毙
+     */
+    private boolean isCheckMate(Board board, Side side) {
         // Traverse all pieces of this side on the board
         for (int r = 0; r < 10; r++) {
             for (int c = 0; c < 9; c++) {
