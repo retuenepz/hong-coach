@@ -7,6 +7,8 @@ spring:
       api-key: sk-6c151a6b56864a038730f90233030a46
   application:
     name: hong-coach
+  profiles:
+    active: dev
 
 logging:
   file:
