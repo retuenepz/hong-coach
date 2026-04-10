@@ -37,10 +37,10 @@ public class XqPlayJuge {
     /**
      * Check game state - for human vs AI games
      */
-    public static GameResult checkGameState(XqRules.Board board, XqRules.Side currentTurn) {
+    public static GameResult checkGameState(Board board, Side currentTurn) {
         // Check if current side is checkmated
         if (isCheckmated(board, currentTurn)) {
-            return currentTurn == XqRules.Side.RED ? GameResult.BLACK_WIN : GameResult.RED_WIN;
+            return currentTurn == Side.RED ? GameResult.BLACK_WIN : GameResult.RED_WIN;
         }
 
         // Check for stalemate (no legal moves but not in check)
@@ -59,7 +59,7 @@ public class XqPlayJuge {
     /**
      * Check if checkmated
      */
-    private static boolean isCheckmated(XqRules.Board board, XqRules.Side side) {
+    private static boolean isCheckmated(Board board, Side side) {
         // 1. Check if currently in check
         if (!board.inCheck(side)) {
             return false;
@@ -72,7 +72,7 @@ public class XqPlayJuge {
     /**
      * Check for stalemate (no legal moves but not in check)
      */
-    private static boolean isStalemate(XqRules.Board board, XqRules.Side side) {
+    private static boolean isStalemate(Board board, Side side) {
         // 1. Must not be in check
         if (board.inCheck(side)) {
             return false;
@@ -85,7 +85,7 @@ public class XqPlayJuge {
     /**
      * Check for insufficient material (face-to-face generals, etc.)
      */
-    private static boolean isInsufficientMaterial(XqRules.Board board) {
+    private static boolean isInsufficientMaterial(Board board) {
         // Simplified version: check if only two generals remain
         int redPieceCount = 0;
         int blackPieceCount = 0;
@@ -94,7 +94,7 @@ public class XqPlayJuge {
             for (int c = 0; c < 9; c++) {
                 XqRules.Piece piece = board.at(r, c);
                 if (piece != null) {
-                    if (piece.side == XqRules.Side.RED) {
+                    if (piece.side == Side.RED) {
                         redPieceCount++;
                     } else {
                         blackPieceCount++;
@@ -110,7 +110,7 @@ public class XqPlayJuge {
     /**
      * Check if specified side has any legal moves
      */
-    private static boolean hasLegalMoves(XqRules.Board board, XqRules.Side side) {
+    private static boolean hasLegalMoves(Board board, Side side) {
         for (int r = 0; r < 10; r++) {
             for (int c = 0; c < 9; c++) {
                 XqRules.Piece piece = board.at(r, c);
@@ -181,12 +181,12 @@ public class XqPlayJuge {
     /**
      * Get game result description - for human vs AI games
      */
-    public static String getResultDescription(GameResult result, XqRules.Side playerSide) {
+    public static String getResultDescription(GameResult result, Side playerSide) {
         switch (result) {
             case RED_WIN:
-                return playerSide == XqRules.Side.RED ? "Congratulations! You checkmated the AI!" : "AI checkmated you!";
+                return playerSide == Side.RED ? "Congratulations! You checkmated the AI!" : "AI checkmated you!";
             case BLACK_WIN:
-                return playerSide == XqRules.Side.BLACK ? "Congratulations! You checkmated the AI!" : "AI checkmated you!";
+                return playerSide == Side.BLACK ? "Congratulations! You checkmated the AI!" : "AI checkmated you!";
             case DRAW:
                 return "Draw!";
             default:
@@ -197,7 +197,7 @@ public class XqPlayJuge {
     /**
      * Check if in check
      */
-    public static boolean isInCheck(XqRules.Board board, XqRules.Side side) {
+    public static boolean isInCheck(Board board, Side side) {
         return board.inCheck(side);
     }
 }

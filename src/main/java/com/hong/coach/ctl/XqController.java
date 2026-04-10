@@ -3,6 +3,9 @@ package com.hong.coach.ctl;
 
 import static com.hong.coach.game.XqRules.*;
 
+import com.hong.coach.game.Board;
+import com.hong.coach.game.PositionMove;
+import com.hong.coach.game.Side;
 import com.hong.coach.game.XqPlayJuge;
 import com.hong.coach.pika.EngineService;
 import org.springframework.web.bind.annotation.*;
@@ -19,18 +22,15 @@ import java.util.Map;
 public class XqController {
 
     private final EngineService engine;
-
-    // Game state
-    private Board board = Board.initial();      // Current board
-    private Side turn  = Side.RED;             // Whose turn
-    private int   foulCount = 0;                // Foul count
-    private final List<String> moveHistory = new ArrayList<>(); // UCI move records
+    /**
+     * 局面缓存
+     */
+    private HashMap<String,Board> boardContext = new HashMap<>();
 
     // New: game state tracking
     private boolean gameOver = false;
     private String winner = null;
     private String gameResult = null;
-    private final List<String[]> foulRecords = new ArrayList<>(); // Foul records
 
     // New: perpetual check/chase detection
     private final Map<String, Integer> positionCounts = new HashMap<>(); // Position repetition count
@@ -42,31 +42,30 @@ public class XqController {
     }
 
     /** New game */
-    @PostMapping("/new")
-    public Map<String, Object> newGame() {
-        board = Board.initial();
-        turn = Side.RED;
-        foulCount = 0;
-        moveHistory.clear();
+    @PostMapping("/new/{id}")
+    public Map<String, Object> newGame(@PathVariable String id) {
+        Board board = boardContext.get(id);
+        if(board != null){
+            board = new Board(id);
+            boardContext.put(id,board);
+        }
         gameOver = false;
         winner = null;
         gameResult = null;
-        foulRecords.clear();
         positionCounts.clear(); // New: clear position count
         lastRepeatedPosition = null;
         isRepeatedMove = false;
 
         Map<String, Object> resp = new HashMap<>();
         resp.put("status", "new");
-        resp.put("turn", turn.toString());
-        resp.put("foul", foulCount);
+        resp.put("turn", board.getTurn());
         resp.put("gameOver", gameOver);
         return resp;
     }
 
     /** Player move */
-    @PostMapping("/move")
-    public Map<String, Object> playerMove(@RequestBody Map<String, Integer> move) throws Exception {
+    @PostMapping("/move/{id}")
+    public Map<String, Object> playerMove(@RequestBody PositionMove move,@PathVariable String id) throws Exception {
         Map<String, Object> resp = new HashMap<>();
 
         // 是不是已经结束了 将死了还走个屁
@@ -76,66 +75,34 @@ public class XqController {
             resp.put("winner", winner);
             return resp;
         }
+        Board board = boardContext.get(id);
+        if(board == null){
+            boardContext.put(id,board = new Board(id));
+        }
 
-        int fromR = move.get("fromR");
-        int fromC = move.get("fromC");
-        int toR = move.get("toR");
-        int toC = move.get("toC");
-
-        Move m = new Move(new Pos(fromR, fromC), new Pos(toR, toC));
+        Move m = new Move(move);
+        // TODO 总感觉这个逻辑怪怪的 非要这么写么 直接检测 目标走法是否合法不行吗 一定要枚举一遍吗
         List<Move> legal = board.legalMovesAt(m.from);
 
         // 1) Legality check
         boolean isLegal = legal.stream().anyMatch(x -> x.to.equals(m.to));
         if (!isLegal) {
-            foulCount++;
-            foulRecords.add(new String[]{String.valueOf(foulCount), "Illegal move"});
 
             resp.put("result", "foul");
-            resp.put("foulCount", foulCount);
             resp.put("message", "Illegal move! Please choose a legal move");
             return resp;
         }
 
-        // New: 似乎是长将检测 不允许玩赖 一直长将
-        String currentPosition = getBoardPosition(board, turn);
-        if (isRepeatedMove && lastRepeatedPosition != null &&
-                currentPosition.equals(lastRepeatedPosition)) {
-            // Still in repeated move, not allowed
-            resp.put("result", "repeated_move");
-            resp.put("message", "Perpetual check or chase prohibited! Please choose another move");
-            resp.put("repeatedPosition", currentPosition);
-            return resp;
-        }
 
         // 2) Player legal move
         Board newBoard = board.makeMove(m);
-        String playerMoveUci = coordToUci(m);
-
-        // New: 盘面重复检测
-        String newPosition = getBoardPosition(newBoard, turn.opponent());
-        int repeatCount = positionCounts.getOrDefault(newPosition, 0) + 1;
-        positionCounts.put(newPosition, repeatCount);
-
-        // Check if repetition threshold reached (5 times)
-        if (repeatCount >= 5) {
-            isRepeatedMove = true;
-            lastRepeatedPosition = newPosition;
-            resp.put("result", "repeated_move");
-            resp.put("message", "Perpetual check or chase prohibited! Please choose another move");
-            resp.put("repeatedPosition", newPosition);
-            resp.put("repeatCount", repeatCount);
-            return resp;
-        } else {
-            isRepeatedMove = false;
-            lastRepeatedPosition = null;
-        }
+        String playerMoveUci = m.coordToUci();
+        board.switchTurn();
 
         // Apply move
         board = newBoard;
-        moveHistory.add(playerMoveUci);
-        turn = turn.opponent();
-
+        board.switchTurn();
+        // TODO 有时间再继续弄
         // 检测是否已经将死
         if (isCheckMate(board, turn)) {
             gameOver = true;
@@ -203,7 +170,6 @@ public class XqController {
         resp.put("result", "ok");
         resp.put("playerMove", playerMoveUci);
         resp.put("aiMove", bestMoveUci != null ? bestMoveUci : "");
-        resp.put("foulCount", foulCount);
         resp.put("isRepeatedMove", isRepeatedMove);
 
         // 返回将军的信息
@@ -278,12 +244,6 @@ public class XqController {
                 gameResult = "Game ended";
         }
 
-        // Only generate CSV file if there are foul records
-        if (foulRecords != null && !foulRecords.isEmpty()) {
-            // Automatically generate CSV file (don't notify user)
-            XqPlayJuge.exportFoulsToCsv(foulRecords, LocalDateTime.now());
-        }
-
         resp.put("result", "game_over");
         resp.put("gameResult", gameResult);
         resp.put("winner", winner);
@@ -292,11 +252,7 @@ public class XqController {
 
     /* ---------- Utilities: Coordinates <-> UCI ---------- */
 
-    private String coordToUci(Move m) {
-        // Columns a..i, rows 9..0 (consistent with common Xiangqi coordinates)
-        return "" + (char)('a' + m.from.c) + (9 - m.from.r)
-                + (char)('a' + m.to.c)   + (9 - m.to.r);
-    }
+
 
     private Move parseUci(String uci) {
         if (uci == null || uci.length() < 4) return null;

@@ -1,5 +1,8 @@
 package com.hong.coach.game;
 
+import org.springframework.util.Assert;
+import org.springframework.validation.annotation.Validated;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -10,22 +13,7 @@ import java.util.Objects;
  */
 public class XqRules {
 
-    /**
-     * 红方/黑方
-     */
-    public enum Side {
-        RED(-1),   // Red at bottom, moves upward
-        BLACK(+1); // Black at top, moves downward
-        public final int dir;
 
-        Side(int d) {
-            this.dir = d;
-        }
-
-        public Side opponent() {
-            return this == RED ? BLACK : RED;
-        }
-    }
 
     /**
      * 棋子枚举
@@ -74,9 +62,23 @@ public class XqRules {
             this.to = to;
         }
 
+        public Move(@Validated PositionMove move) {
+            this.from = new Pos(move.getFromR(), move.getFromC());
+            this.to = new Pos(move.getToR(), move.getToC());
+        }
+
         @Override
         public String toString() {
             return from + "->" + to;
+        }
+
+        /**
+         * 获取当前移动的UCI表示法
+         * @return
+         */
+        public String coordToUci() {
+            return "" + (char)('a' + this.from.c) + (9 - this.from.r)
+                    + (char)('a' + this.to.c)   + (9 - this.to.r);
         }
     }
 
@@ -308,178 +310,5 @@ public class XqRules {
         }
     }
 
-    /**
-     * 棋盘
-     */
-    public static final class Board {
-        private final Piece[][] grid = new Piece[10][9];
 
-        public boolean in(int r, int c) {
-            return r >= 0 && r < 10 && c >= 0 && c < 9;
-        }
-
-        public Piece at(int r, int c) {
-            return in(r, c) ? grid[r][c] : null;
-        }
-
-        public void set(int r, int c, Piece p) {
-            if (in(r, c)) {
-                grid[r][c] = p;
-                if (p != null) p.pos = new Pos(r, c);
-            }
-        }
-
-        /**
-         * Create initial setup
-         */
-        public static Board initial() {
-            Board b = new Board();
-            // Black side (top)
-            b.set(0, 0, new Rook(Side.BLACK, new Pos(0, 0)));
-            b.set(0, 1, new Horse(Side.BLACK, new Pos(0, 1)));
-            b.set(0, 2, new Elephant(Side.BLACK, new Pos(0, 2)));
-            b.set(0, 3, new Advisor(Side.BLACK, new Pos(0, 3)));
-            b.set(0, 4, new General(Side.BLACK, new Pos(0, 4)));
-            b.set(0, 5, new Advisor(Side.BLACK, new Pos(0, 5)));
-            b.set(0, 6, new Elephant(Side.BLACK, new Pos(0, 6)));
-            b.set(0, 7, new Horse(Side.BLACK, new Pos(0, 7)));
-            b.set(0, 8, new Rook(Side.BLACK, new Pos(0, 8)));
-            b.set(2, 1, new Cannon(Side.BLACK, new Pos(2, 1)));
-            b.set(2, 7, new Cannon(Side.BLACK, new Pos(2, 7)));
-            for (int c = 0; c < 9; c += 2) b.set(3, c, new Pawn(Side.BLACK, new Pos(3, c)));
-
-            // Red side (bottom)
-            b.set(9, 0, new Rook(Side.RED, new Pos(9, 0)));
-            b.set(9, 1, new Horse(Side.RED, new Pos(9, 1)));
-            b.set(9, 2, new Elephant(Side.RED, new Pos(9, 2)));
-            b.set(9, 3, new Advisor(Side.RED, new Pos(9, 3)));
-            b.set(9, 4, new General(Side.RED, new Pos(9, 4)));
-            b.set(9, 5, new Advisor(Side.RED, new Pos(9, 5)));
-            b.set(9, 6, new Elephant(Side.RED, new Pos(9, 6)));
-            b.set(9, 7, new Horse(Side.RED, new Pos(9, 7)));
-            b.set(9, 8, new Rook(Side.RED, new Pos(9, 8)));
-            b.set(7, 1, new Cannon(Side.RED, new Pos(7, 1)));
-            b.set(7, 7, new Cannon(Side.RED, new Pos(7, 7)));
-            for (int c = 0; c < 9; c += 2) b.set(6, c, new Pawn(Side.RED, new Pos(6, c)));
-            return b;
-        }
-
-        /**
-         * 九宫格检测
-         * 主要是看老将 不能走出九宫格
-         */
-        public boolean inPalace(Side s, int r, int c) {
-            if (!in(r, c)) return false;
-            if (s == Side.RED) return r >= 7 && r <= 9 && c >= 3 && c <= 5;
-            else return r >= 0 && r <= 2 && c >= 3 && c <= 5;
-        }
-
-        /**
-         * 找到老将的位置
-         */
-        public Pos findGeneral(Side s) {
-            for (int r = 0; r < 10; r++)
-                for (int c = 0; c < 9; c++) {
-                    Piece p = grid[r][c];
-                    if (p != null && p.type == PieceType.GENERAL && p.side == s) return new Pos(r, c);
-                }
-            return null;
-        }
-
-        /**
-         * Check if column is clear between two rows (excluding ends)
-         */
-        public boolean clearBetweenSameCol(int r1, int r2, int c) {
-            int a = Math.min(r1, r2) + 1, b = Math.max(r1, r2) - 1;
-            for (int r = a; r <= b; r++) if (grid[r][c] != null) return false;
-            return true;
-        }
-
-        /**
-         * 检测老将是否对脸
-         */
-        public boolean generalsFacing() {
-            Pos r = findGeneral(Side.RED), k = findGeneral(Side.BLACK);
-            if (r == null || k == null) return false;
-            if (r.c != k.c) return false;
-            return clearBetweenSameCol(r.r, k.r, r.c);
-        }
-
-        /**
-         * 移动棋子
-         */
-        public Board makeMove(Move m) {
-            Board nb = this.cloneBoard();
-            Piece p = nb.at(m.from.r, m.from.c);
-            nb.set(m.from.r, m.from.c, null);
-            nb.set(m.to.r, m.to.c, p);
-            return nb;
-        }
-
-        /**
-         * 检测是否被将军
-         */
-        public boolean inCheck(Side side) {
-            Pos g = findGeneral(side);
-            if (g == null) return false;
-            // 枚举所有地方棋子的合法移动 检测将军
-            for (int r = 0; r < 10; r++)
-                for (int c = 0; c < 9; c++) {
-                    Piece q = grid[r][c];
-                    if (q == null || q.side == side) continue;
-                    for (Pos dst : q.pseudoLegalMoves(this)) {
-                        if (dst.r == g.r && dst.c == g.c) return true;
-                    }
-                }
-            // Face-to-face generals
-            return generalsFacing();
-        }
-
-        /**
-         * 找出给定位置的棋子所有合法的走法
-         * 1.走完之后不能老将对脸
-         * 2.走完之后不能老将被吃
-         */
-        public List<Move> legalMovesAt(Pos from) {
-            Piece p = at(from.r, from.c);
-            if (p == null) return Collections.emptyList();
-            List<Move> out = new ArrayList<>();
-            for (Pos to : p.pseudoLegalMoves(this)) {
-                Board nb = makeMove(new Move(from, to));
-                if (nb.generalsFacing()) continue;
-                if (nb.inCheck(p.side)) continue;
-                out.add(new Move(from, to));
-            }
-            return out;
-        }
-
-        /**
-         * 复制棋盘
-         */
-        public Board cloneBoard() {
-            Board b = new Board();
-            for (int r = 0; r < 10; r++)
-                for (int c = 0; c < 9; c++) {
-                    Piece p = grid[r][c];
-                    if (p == null) {
-                        b.grid[r][c] = null;
-                        continue;
-                    }
-                    // Copy by type
-                    Piece np;
-                    switch (p.type) {
-                        case ROOK -> np = new Rook(p.side, new Pos(r, c));
-                        case CANNON -> np = new Cannon(p.side, new Pos(r, c));
-                        case HORSE -> np = new Horse(p.side, new Pos(r, c));
-                        case ELEPHANT -> np = new Elephant(p.side, new Pos(r, c));
-                        case ADVISOR -> np = new Advisor(p.side, new Pos(r, c));
-                        case GENERAL -> np = new General(p.side, new Pos(r, c));
-                        case PAWN -> np = new Pawn(p.side, new Pos(r, c));
-                        default -> throw new IllegalStateException();
-                    }
-                    b.grid[r][c] = np;
-                }
-            return b;
-        }
-    }
 }

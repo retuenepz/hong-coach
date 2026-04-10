@@ -39,10 +39,10 @@ public class XqEndgameJudge {
     /**
      * Check game state
      */
-    public static GameResult checkGameState(XqRules.Board board, XqRules.Side currentTurn) {
+    public static GameResult checkGameState(Board board, Side currentTurn) {
         // Check if current side is checkmated
         if (isCheckmated(board, currentTurn)) {
-            return currentTurn == XqRules.Side.RED ? GameResult.BLACK_WIN : GameResult.RED_WIN;
+            return currentTurn == Side.RED ? GameResult.BLACK_WIN : GameResult.RED_WIN;
         }
 
         // Check for stalemate (no legal moves but not in check)
