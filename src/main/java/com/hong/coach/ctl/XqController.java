@@ -97,7 +97,7 @@ public class XqController {
             return resp;
         }
 
-        // New: check if in repeated move state
+        // New: 似乎是长将检测 不允许玩赖 一直长将
         String currentPosition = getBoardPosition(board, turn);
         if (isRepeatedMove && lastRepeatedPosition != null &&
                 currentPosition.equals(lastRepeatedPosition)) {
@@ -112,7 +112,7 @@ public class XqController {
         Board newBoard = board.makeMove(m);
         String playerMoveUci = coordToUci(m);
 
-        // New: check position repetition
+        // New: 盘面重复检测
         String newPosition = getBoardPosition(newBoard, turn.opponent());
         int repeatCount = positionCounts.getOrDefault(newPosition, 0) + 1;
         positionCounts.put(newPosition, repeatCount);

@@ -365,7 +365,8 @@ public class XqRules {
         }
 
         /**
-         * Check if in palace
+         * 九宫格检测
+         * 主要是看老将 不能走出九宫格
          */
         public boolean inPalace(Side s, int r, int c) {
             if (!in(r, c)) return false;
@@ -374,7 +375,7 @@ public class XqRules {
         }
 
         /**
-         * Find general position
+         * 找到老将的位置
          */
         public Pos findGeneral(Side s) {
             for (int r = 0; r < 10; r++)
