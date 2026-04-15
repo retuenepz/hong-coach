@@ -4,6 +4,7 @@ import lombok.Data;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedList;
 import java.util.List;
 
 /**
@@ -12,11 +13,9 @@ import java.util.List;
 @Data
 public final class Board {
     /**
-     * uci表示法记录的 走棋历史记录
-     * TODO 感觉这玩意没啥用其实  可以考虑给他去掉
+     * 走棋历史
      */
-    private List<String> moveHistory = new ArrayList<>();
-
+    private LinkedList<Move> moveHistory;
     public Board(String id) {
         this.id = id;
         newGame();
@@ -31,6 +30,14 @@ public final class Board {
      * 默认红方先行
      */
     private Side turn = Side.RED;
+    /**
+     * 棋局结果
+     */
+    private GameResultEnum gameState = GameResultEnum.PLAYING;
+    /**
+     * 胜者
+     */
+    private Side winner  = null;
 
     private final XqRules.Piece[][] grid = new XqRules.Piece[10][9];
 
@@ -53,8 +60,6 @@ public final class Board {
      * 创建个新棋盘 摆好棋子
      */
     public Board newGame() {
-        // 清理历史
-        this.moveHistory = new ArrayList<>();
         // 默认红方先走
         turn = Side.RED;
         // 创建黑方原始棋子
@@ -131,12 +136,36 @@ public final class Board {
     /**
      * 移动棋子
      */
-    public Board makeMove(XqRules.Move m) {
-        Board nb = this.cloneBoard();
-        XqRules.Piece p = nb.at(m.from.r, m.from.c);
-        nb.set(m.from.r, m.from.c, null);
-        nb.set(m.to.r, m.to.c, p);
-        return nb;
+    public void makeMove(Move m) {
+        XqRules.Piece p = this.at(m.from.r, m.from.c);
+        m.setToPiece(this.at(m.to.r, m.to.c));
+        this.set(m.from.r, m.from.c, null);
+        this.set(m.to.r, m.to.c, p);
+        moveHistory.push(m);
+        if(this.isCheckMate()){
+            gameOver();
+        }else{
+            // 换手
+            this.switchTurn();
+        }
+    }
+
+    /**
+     * 回退一步/悔棋
+     */
+    public void retriveMove(){
+        Move move = moveHistory.pop();
+        XqRules.Piece piece = this.at(move.to.r, move.to.c);
+        this.set(move.to.r,move.to.c, move.getToPiece());
+        this.set(move.from.r,move.from.c, piece);
+    }
+
+    /**
+     * 棋局分出胜负后的处理
+     */
+    private void gameOver() {
+        this.winner = turn;
+        this.gameState = GameResultEnum.END;
     }
 
     /**
@@ -154,7 +183,6 @@ public final class Board {
                     if (dst.r == g.r && dst.c == g.c) return true;
                 }
             }
-        // Face-to-face generals
         return generalsFacing();
     }
 
@@ -163,47 +191,23 @@ public final class Board {
      * 1.走完之后不能老将对脸
      * 2.走完之后不能老将被吃
      */
-    public List<XqRules.Move> legalMovesAt(XqRules.Pos from) {
+    public List<Move> legalMovesAt(XqRules.Pos from) {
         XqRules.Piece p = at(from.r, from.c);
         if (p == null) return Collections.emptyList();
-        List<XqRules.Move> out = new ArrayList<>();
+        List<Move> out = new ArrayList<>();
         for (XqRules.Pos to : p.pseudoLegalMoves(this)) {
-            Board nb = makeMove(new XqRules.Move(from, to));
-            if (nb.generalsFacing()) continue;
-            if (nb.inCheck(p.side)) continue;
-            out.add(new XqRules.Move(from, to));
+            boolean islegal = true;
+            makeMove(new Move(from, to));
+            if (this.generalsFacing()) islegal = false;
+            if (this.inCheck(p.side)) islegal = false;
+            if(islegal){
+                out.add(new Move(from, to));
+            }
+            retriveMove();
         }
         return out;
     }
 
-    /**
-     * 复制棋盘
-     */
-    public Board cloneBoard() {
-        Board b = new Board();
-        for (int r = 0; r < 10; r++)
-            for (int c = 0; c < 9; c++) {
-                XqRules.Piece p = grid[r][c];
-                if (p == null) {
-                    b.grid[r][c] = null;
-                    continue;
-                }
-                // Copy by type
-                XqRules.Piece np;
-                switch (p.type) {
-                    case ROOK -> np = new XqRules.Rook(p.side, new XqRules.Pos(r, c));
-                    case CANNON -> np = new XqRules.Cannon(p.side, new XqRules.Pos(r, c));
-                    case HORSE -> np = new XqRules.Horse(p.side, new XqRules.Pos(r, c));
-                    case ELEPHANT -> np = new XqRules.Elephant(p.side, new XqRules.Pos(r, c));
-                    case ADVISOR -> np = new XqRules.Advisor(p.side, new XqRules.Pos(r, c));
-                    case GENERAL -> np = new XqRules.General(p.side, new XqRules.Pos(r, c));
-                    case PAWN -> np = new XqRules.Pawn(p.side, new XqRules.Pos(r, c));
-                    default -> throw new IllegalStateException();
-                }
-                b.grid[r][c] = np;
-            }
-        return b;
-    }
 
     /**
      * 换手
@@ -216,4 +220,30 @@ public final class Board {
         }
     }
 
+    /**
+     * 检测还有没有棋可以走
+     * 没棋走了 要么就是绝杀/要么困毙
+     */
+    public boolean isCheckMate() {
+        for (int r = 0; r < 10; r++) {
+            for (int c = 0; c < 9; c++) {
+                XqRules.Piece piece = this.at(r, c);
+                if (piece != null && piece.side == turn) {
+                    List<Move> legalMoves = this.legalMovesAt(new XqRules.Pos(r, c));
+                    if (!legalMoves.isEmpty()) {
+                        return false;
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
+    /**
+     * 将当前棋盘的盘面转换为fen表示法
+     * @return
+     */
+    public String getFen() {
+        return null;
+    }
 }

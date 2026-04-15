@@ -57,7 +57,7 @@ public class XqPlayJuge {
     }
 
     /**
-     * Check if checkmated
+     * 将死了没
      */
     private static boolean isCheckmated(Board board, Side side) {
         // 1. Check if currently in check
@@ -115,7 +115,7 @@ public class XqPlayJuge {
             for (int c = 0; c < 9; c++) {
                 XqRules.Piece piece = board.at(r, c);
                 if (piece != null && piece.side == side) {
-                    List<XqRules.Move> moves = board.legalMovesAt(new XqRules.Pos(r, c));
+                    List<Move> moves = board.legalMovesAt(new XqRules.Pos(r, c));
                     if (!moves.isEmpty()) {
                         return true;
                     }

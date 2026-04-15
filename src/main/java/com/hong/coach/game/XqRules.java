@@ -51,36 +51,7 @@ public class XqRules {
         }
     }
 
-    /**
-     * 移动
-     */
-    public static final class Move {
-        public final Pos from, to;
 
-        public Move(Pos from, Pos to) {
-            this.from = from;
-            this.to = to;
-        }
-
-        public Move(@Validated PositionMove move) {
-            this.from = new Pos(move.getFromR(), move.getFromC());
-            this.to = new Pos(move.getToR(), move.getToC());
-        }
-
-        @Override
-        public String toString() {
-            return from + "->" + to;
-        }
-
-        /**
-         * 获取当前移动的UCI表示法
-         * @return
-         */
-        public String coordToUci() {
-            return "" + (char)('a' + this.from.c) + (9 - this.from.r)
-                    + (char)('a' + this.to.c)   + (9 - this.to.r);
-        }
-    }
 
     /* 棋子类 */
 

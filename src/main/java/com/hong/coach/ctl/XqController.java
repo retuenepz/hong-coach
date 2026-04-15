@@ -3,10 +3,7 @@ package com.hong.coach.ctl;
 
 import static com.hong.coach.game.XqRules.*;
 
-import com.hong.coach.game.Board;
-import com.hong.coach.game.PositionMove;
-import com.hong.coach.game.Side;
-import com.hong.coach.game.XqPlayJuge;
+import com.hong.coach.game.*;
 import com.hong.coach.pika.EngineService;
 import org.springframework.web.bind.annotation.*;
 
@@ -34,7 +31,6 @@ public class XqController {
 
     // New: perpetual check/chase detection
     private final Map<String, Integer> positionCounts = new HashMap<>(); // Position repetition count
-    private String lastRepeatedPosition = null; // Last repeated position
     private boolean isRepeatedMove = false;     // Whether in repeated move state
 
     public XqController(EngineService engine) {
@@ -53,7 +49,6 @@ public class XqController {
         winner = null;
         gameResult = null;
         positionCounts.clear(); // New: clear position count
-        lastRepeatedPosition = null;
         isRepeatedMove = false;
 
         Map<String, Object> resp = new HashMap<>();
@@ -84,35 +79,27 @@ public class XqController {
         // TODO 总感觉这个逻辑怪怪的 非要这么写么 直接检测 目标走法是否合法不行吗 一定要枚举一遍吗
         List<Move> legal = board.legalMovesAt(m.from);
 
-        // 1) Legality check
         boolean isLegal = legal.stream().anyMatch(x -> x.to.equals(m.to));
         if (!isLegal) {
-
             resp.put("result", "foul");
             resp.put("message", "Illegal move! Please choose a legal move");
             return resp;
         }
 
 
-        // 2) Player legal move
-        Board newBoard = board.makeMove(m);
+        board.makeMove(m);
         String playerMoveUci = m.coordToUci();
-        board.switchTurn();
 
-        // Apply move
-        board = newBoard;
-        board.switchTurn();
-        // TODO 有时间再继续弄
         // 检测是否已经将死
-        if (isCheckMate(board, turn)) {
+        if (board.isCheckMate()) {
             gameOver = true;
-            winner = turn.opponent().toString(); // Opponent wins
-            gameResult = turn.opponent() == Side.RED ? "Red wins (stalemate)" : "Black wins (stalemate)";
+//            winner = turn.opponent().toString(); // Opponent wins
+//            gameResult = turn.opponent() == Side.RED ? "Red wins (stalemate)" : "Black wins (stalemate)";
 
             resp.put("result", "game_over");
-            resp.put("gameResult", gameResult);
-            resp.put("winner", winner);
-            resp.put("resultDescription", "Stalemate - " + (turn.opponent() == Side.RED ? "Red" : "Black") + " wins");
+//            resp.put("gameResult", gameResult);
+//            resp.put("winner", winner);
+//            resp.put("resultDescription", "Stalemate - " + (turn.opponent() == Side.RED ? "Red" : "Black") + " wins");
             return resp;
         }
 
@@ -125,35 +112,13 @@ public class XqController {
         }
 
         // pikafish 分析一个bestMove
-        String bestMoveUci = engine.bestMove(null, moveHistory);
+        String bestMoveUci = engine.bestMove(board.getFen(), null);
 
         // 执行一下bestMove 修改盘面
         if (bestMoveUci != null && !bestMoveUci.isEmpty()) {
-            Move aiMove = parseUci(bestMoveUci);
+            Move aiMove = new Move(bestMoveUci);
             if (aiMove != null) {
-                Board aiBoard = board.makeMove(aiMove);
-
-                // 长将检测
-                String aiPosition = getBoardPosition(aiBoard, turn);
-                int aiRepeatCount = positionCounts.getOrDefault(aiPosition, 0) + 1;
-                positionCounts.put(aiPosition, aiRepeatCount);
-
-                if (aiRepeatCount >= 5) {
-                    // 长将算输
-                    gameOver = true;
-                    winner = Side.RED.toString(); // Player plays red
-                    gameResult = "Red wins (AI perpetual check)";
-
-                    resp.put("result", "game_over");
-                    resp.put("gameResult", gameResult);
-                    resp.put("winner", winner);
-                    resp.put("resultDescription", "AI perpetual check foul - Red wins");
-                    return resp;
-                }
-
-                board = aiBoard;
-                moveHistory.add(bestMoveUci);
-                turn = turn.opponent();
+                board.makeMove(aiMove);
             }
         }
 
@@ -221,7 +186,7 @@ public class XqController {
 
     /** Check game state */
     private XqPlayJuge.GameResult checkGameState() {
-        return XqPlayJuge.checkGameState(board, turn);
+        return null;
     }
 
     /** Handle game end */
@@ -250,16 +215,4 @@ public class XqController {
         resp.put("resultDescription", XqPlayJuge.getResultDescription(gameState, Side.RED)); // Player plays red
     }
 
-    /* ---------- Utilities: Coordinates <-> UCI ---------- */
-
-
-
-    private Move parseUci(String uci) {
-        if (uci == null || uci.length() < 4) return null;
-        int fromC = uci.charAt(0) - 'a';
-        int fromR = 9 - (uci.charAt(1) - '0');
-        int toC = uci.charAt(2) - 'a';
-        int toR = 9 - (uci.charAt(3) - '0');
-        return new Move(new Pos(fromR, fromC), new Pos(toR, toC));
-    }
 }
