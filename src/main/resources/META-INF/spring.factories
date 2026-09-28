@@ -1,0 +1,5 @@
+# Spring Boot 环境后处理器
+# DashScopeAutoConfigGuard：没配大模型 key 时自动关掉 DashScope 自动配置，
+# 避免它「key 非空」的断言在启动阶段炸掉整个应用。
+org.springframework.boot.env.EnvironmentPostProcessor=\
+com.hong.coach.config.DashScopeAutoConfigGuard

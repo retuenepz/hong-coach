@@ -1,0 +1,52 @@
+# =====================================================================
+#  生产环境配置（自建服务器 / Docker 部署）
+#
+#  这个 profile 里没有任何硬编码的地址和密钥，全部从环境变量读取：
+#  怎么传见 deploy/DEPLOY.md，或直接看 .env.example。
+#
+#  启动：SPRING_PROFILES_ACTIVE=prod java -jar target/hong-coach-1.0-SNAPSHOT.jar
+# =====================================================================
+
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    # DB_HOST 默认是 mysql —— docker-compose 里的服务名，同网络内可直接解析
+    url: 'jdbc:mysql://${DB_HOST:mysql}:${DB_PORT:3306}/${DB_NAME:chess_coach_db}?useUnicode=true&characterEncoding=utf8&zeroDateTimeBehavior=convertToNull&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai'
+    username: ${DB_USER:chess}
+    password: ${DB_PASSWORD:}
+    hikari:
+      # 连不上库时不要在启动阶段就把应用拖死：对局会降级为仅内存
+      initialization-fail-timeout: -1
+      connection-timeout: 3000
+      maximum-pool-size: ${DB_POOL_SIZE:8}
+      minimum-idle: 1
+  ai:
+    dashscope:
+      api-key: ${DASHSCOPE_API_KEY:}
+
+server:
+  port: ${SERVER_PORT:8080}
+  # 前面挂了 Nginx 之类的反向代理时，让日志和链接记到真实的访问者地址
+  forward-headers-strategy: framework
+
+engine:
+  # 引擎目录：容器里是挂进来的 /opt/engine，裸机部署可以指到任意目录
+  path: ${ENGINE_PATH:/opt/engine}
+  exe-file-name: ${ENGINE_EXE:Pikafish-Linux-x86-64-universal}
+  nnue-file-name: ${ENGINE_NNUE:pikafish.nnue}
+  # 几个实例决定能同时服务几局；每个实例约占一个 CPU 核
+  pool-size: ${ENGINE_POOL_SIZE:2}
+  play-movetime: ${ENGINE_PLAY_MOVETIME:600}
+  analyze-movetime: ${ENGINE_ANALYZE_MOVETIME:900}
+
+coach:
+  enabled: ${COACH_ENABLED:true}
+  trigger-threshold: ${COACH_TRIGGER_THRESHOLD:80}
+  timeout-ms: ${COACH_TIMEOUT_MS:40000}
+
+logging:
+  file:
+    path: ${LOG_PATH:logs}
+  level:
+    root: INFO
+    com.hong.coach: INFO

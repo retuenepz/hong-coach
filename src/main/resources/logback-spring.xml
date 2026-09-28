@@ -49,7 +49,8 @@
         </rollingPolicy>
     </appender>
 
-    <logger name="com.hong.coach.pika" level="DEBUG" additivity="false">
+    <!-- 引擎模块单独开到 DEBUG：需要看 UCI 协议往来时不用改全局日志级别 -->
+    <logger name="com.hong.coach.engine" level="DEBUG" additivity="false">
         <appender-ref ref="CONSOLE"/>
         <appender-ref ref="FILE"/>
         <appender-ref ref="FILE_ERROR"/>

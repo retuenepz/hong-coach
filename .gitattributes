@@ -1,0 +1,9 @@
+# 这些文件会被 Linux / Docker 直接执行或读取，必须始终是 LF。
+# 带 CRLF 的 shell 脚本在 Linux 上会报一个很难联想到换行符的错：
+#   /usr/bin/env: 'bash\r': No such file or directory
+#
+# 本机 core.autocrlf=true，checkout 时会把文本转成 CRLF —— 有了这几行，
+# .sh / .yml / Dockerfile 在 Linux 上永远是 LF。
+*.sh text eol=lf
+*.yml text eol=lf
+Dockerfile text eol=lf

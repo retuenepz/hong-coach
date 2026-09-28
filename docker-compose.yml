@@ -1,0 +1,75 @@
+# =====================================================================
+#  hong-coach 一键部署：应用 + MySQL 8
+#
+#  1. cp .env.example .env  并填好密码
+#  2. bash deploy/fetch-engine.sh          # 下载 Linux 版引擎到 ./engine
+#  3. docker compose up -d --build
+#
+#  然后访问 http://<服务器IP>:8080  （根路径会跳到 play.html）
+#  表结构由应用启动时的 DatabaseSchemaInitializer 自动建，不需要手工导 SQL。
+# =====================================================================
+services:
+
+  mysql:
+    image: mysql:8.0
+    container_name: hong-coach-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?请在 .env 里设置 DB_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME:-chess_coach_db}
+      # 注意：MySQL 官方镜像不允许把 MYSQL_USER 设成 root
+      MYSQL_USER: ${DB_USER:-chess}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?请在 .env 里设置 DB_PASSWORD}
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-time-zone=+08:00
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      # 用 root 探活；$$ 是转义，让 $MYSQL_ROOT_PASSWORD 在容器内展开
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+
+  app:
+    build:
+      context: .
+    image: hong-coach:latest
+    container_name: hong-coach-app
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      SERVER_PORT: 8080
+      DB_HOST: mysql          # compose 网络内的服务名，可直接当主机名用
+      DB_PORT: 3306
+      DB_NAME: ${DB_NAME:-chess_coach_db}
+      DB_USER: ${DB_USER:-chess}
+      DB_PASSWORD: ${DB_PASSWORD:?请在 .env 里设置 DB_PASSWORD}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-8}
+      # 留空则 AI 教练降级为本地提示，下棋和引擎复盘不受影响
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+      ENGINE_PATH: /opt/engine
+      ENGINE_EXE: Pikafish-Linux-x86-64-universal
+      ENGINE_NNUE: pikafish.nnue
+      ENGINE_POOL_SIZE: ${ENGINE_POOL_SIZE:-2}
+      TZ: Asia/Shanghai
+    ports:
+      # 只映射到宿主机端口；想只让 Nginx 访问就改成 "127.0.0.1:${APP_PORT:-8080}:8080"
+      - "${APP_PORT:-8080}:8080"
+    volumes:
+      # 引擎只读挂进来。注意别省掉这个挂载：镜像里没有引擎，
+      # 挂不上就只剩手动走子，「电脑走一步」和复盘讲解会不可用。
+      - ./engine:/opt/engine:ro
+      # 日志不挂宿主机目录：容器里跑的是非 root 用户，挂上来的宿主目录
+      # 属主对不上就写不进去，表现成「应用在跑但日志一直报错」。
+      # 看日志用 docker compose logs -f app（logback 同时也写控制台）。
+
+volumes:
+  mysql-data:

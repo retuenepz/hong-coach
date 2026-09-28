@@ -1,25 +1,54 @@
 server:
-  port: 8080
+  port: ${SERVER_PORT:8080}
 
 spring:
-  ai:
-    dashscope:
-      api-key: sk-6c151a6b56864a038730f90233030a46
   application:
     name: hong-coach
   profiles:
-    active: dev
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+  ai:
+    dashscope:
+      # 只能从环境变量注入。没配时 AI 教练自动降级为本地提示，不影响下棋。
+      api-key: ${DASHSCOPE_API_KEY:}
+# 建表由 config/DatabaseSchemaInitializer 在启动后执行（见 db/schema.sql），
+# 不用 spring.sql.init 是因为它在连不上库时会直接让应用起不来。
+
+mybatis-plus:
+  configuration:
+    # 枚举按名字存成字符串（RED / BLACK），换枚举值顺序不会损坏历史数据
+    default-enum-type-handler: org.apache.ibatis.type.EnumTypeHandler
+  global-config:
+    banner: false
 
 logging:
   file:
     path: logs
   level:
     root: INFO
-    com.hong.coach.pika: DEBUG
     com.hong.coach: INFO
 
+# 象棋引擎配置
 engine:
-  path: C:\Users\test\Desktop\pika\20260131
-  movetime: 200
-  nnue-file-name: pikafish.nnue
-  exe-file-name: pikafish-avx2.exe
+  # 引擎目录。留空或指向不存在的目录时，自动使用 classpath 内置引擎（src/main/resources/engine）
+  path: ${ENGINE_PATH:}
+  # Windows 本地开发用 avx2 版；Linux 服务器上通常改成 Pikafish-Linux-x86-64-universal
+  exe-file-name: ${ENGINE_EXE:pikafish-avx2.exe}
+  nnue-file-name: ${ENGINE_NNUE:pikafish.nnue}
+  # 电脑落子时的思考时间（毫秒），越大越强也越慢
+  play-movetime: 600
+  # 复盘分析时的思考时间（毫秒）
+  analyze-movetime: 900
+  # 复盘时输出几路主变
+  multi-pv: 3
+  # 引擎进程池大小，决定能同时服务几局
+  pool-size: 2
+  # 借用引擎的最长等待时间（毫秒）
+  borrow-timeout-ms: 15000
+
+# AI 教练配置
+coach:
+  enabled: true
+  # 用户一步棋亏超过多少厘兵（80 = 0.8 个兵）就主动开口讲解
+  trigger-threshold: 80
+  # 单次大模型调用超时（毫秒），超时降级为本地提示
+  timeout-ms: 40000

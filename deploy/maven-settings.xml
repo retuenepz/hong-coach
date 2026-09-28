@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  =====================================================================
+   Docker 构建阶段用的 Maven settings。
+
+   作用只有一个：把中央仓库指向阿里云公共镜像，国内服务器构建镜像时
+   拉依赖快很多（这个项目依赖量约 200MB，走官方源可能要十几分钟甚至超时）。
+
+   海外服务器、或者想用官方源：把 Dockerfile 里那行
+       COPY deploy/maven-settings.xml /root/.m2/settings.xml
+   删掉即可。
+
+   注意 <mirrorOf>central</mirrorOf> 只劫持 central，不影响其他仓库声明。
+  =====================================================================
+-->
+<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0
+                              https://maven.apache.org/xsd/settings-1.0.0.xsd">
+
+    <mirrors>
+        <mirror>
+            <id>aliyun-public</id>
+            <name>阿里云公共仓库</name>
+            <url>https://maven.aliyun.com/repository/public</url>
+            <mirrorOf>central</mirrorOf>
+        </mirror>
+    </mirrors>
+
+</settings>

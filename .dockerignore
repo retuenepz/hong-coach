@@ -1,0 +1,24 @@
+# 构建产物与本地运行时产物：容器里会重新编译，不需要上传
+target/
+logs/
+tmp/
+
+# 版本管理 / IDE
+.git/
+.gitignore
+.idea/
+.vscode/
+*.iml
+dependency-tree.txt
+
+# 本地文档与记忆
+.workbuddy/
+deploy/*.local
+
+# 关键：仓库里那份内置引擎是 Windows 的 .exe，Linux 容器里跑不了，
+# 而且 nnue 权重有 50MB，塞进镜像纯属浪费。
+# Linux 引擎在服务器上单独下载，以卷的形式挂到 /opt/engine（见 deploy/DEPLOY.md）。
+src/main/resources/engine/
+
+# 真实密钥文件绝不进镜像
+.env

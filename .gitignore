@@ -37,4 +37,19 @@ build/
 
 ### Mac OS ###
 .DS_Store
+
+### 本地运行时产物 ###
+logs/
 /src/main/resources/engine/
+
+### 部署产物与密钥 ###
+# Linux 版引擎（deploy/fetch-engine.sh 下载，50MB 权重不入库）
+/engine/
+# 真实环境变量文件；模板 .env.example 要提交
+.env
+.env.local
+
+### 临时文件与本地记忆 ###
+# tmp/ 下是调试用的临时脚本，还可能有下载缓存（引擎 7z 包就有 50MB+），不入库
+/tmp/
+.workbuddy/

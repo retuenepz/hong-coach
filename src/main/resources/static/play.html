@@ -1,434 +1,865 @@
 <!DOCTYPE html>
-<html lang="zh">
+<html lang="zh-CN">
 <head>
-    <meta charset="UTF-8" />
-    <title>Player vs AI - Chinese Chess</title>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>棋叔 · 中国象棋 AI 陪练</title>
     <style>
-        :root{ --cell:50px; }
-        body{
-            margin:0;
-            padding:20px;
-            display:flex;
-            gap:80px;
-            font-family:system-ui, sans-serif;
-            background:#fafafb;
-            justify-content: center;
+        * { box-sizing: border-box; }
+        body {
+            margin: 0; padding: 20px;
+            font-family: system-ui, "Microsoft YaHei", sans-serif;
+            background: #f7f7f9; color: #2c2c2a;
+            display: flex; justify-content: center;
         }
-        #gameArea{
-            display: flex;
-            width: 100%;
-            max-width: 1200px;
+        .app { display: flex; gap: 20px; width: 100%; max-width: 1180px; align-items: flex-start; }
+        .left { flex: 0 0 auto; display: flex; flex-direction: column; gap: 12px; }
+        .right { flex: 1 1 auto; min-width: 320px; display: flex; flex-direction: column; gap: 12px; }
+
+        .card { background: #fff; border: 1px solid #e6e6e3; border-radius: 12px; padding: 12px; }
+
+        .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        button {
+            padding: 7px 13px; border-radius: 9px; border: 1px solid #ddd;
+            background: #fff; cursor: pointer; font-size: 13px; color: #2c2c2a;
         }
-        #leftCol{
-            display:flex;
-            flex-direction:column;
-            gap:15px;
-            align-items:center;
-            flex: 0 0 auto;
+        button:hover:not(:disabled) { box-shadow: 0 2px 10px rgba(0,0,0,.08); }
+        button:disabled { opacity: .5; cursor: not-allowed; }
+        button.primary { background: #185FA5; border-color: #185FA5; color: #fff; }
+
+        #board { border: 1px solid #dfe0dd; border-radius: 6px; background: #fefefe; }
+
+        #statusBar {
+            padding: 9px 12px; border-radius: 9px; font-size: 13px; font-weight: 500;
+            background: #f1efe8; border: 1px solid #e3e1d8; color: #444441; min-height: 36px;
+            display: flex; align-items: center;
         }
-        #board{
-            border:1px solid #222;
-            background:#fefefe;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-        }
-        .toolbar{
-            display:flex;
-            gap:8px;
-            align-items:center;
-            flex-wrap:wrap;
-        }
-        button{
-            padding:8px 14px;
-            border-radius:10px;
-            border:1px solid #ddd;
-            background:#fff;
-            cursor:pointer;
-            font-size:14px;
-        }
-        button:hover{
-            box-shadow:0 4px 12px rgba(0,0,0,.08);
-        }
-        h3{
-            margin:.2rem 0;
-            color: #333;
-        }
-        table{
-            border-collapse:collapse;
-            background:#fff;
-            border-radius:12px;
-            overflow:hidden;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-        }
-        th,td{
-            border:1px solid #eee;
-            padding:8px 10px;
-            font-size:14px;
-            text-align:center;
-        }
-        th {
-            background-color: #f8f9fa;
-            font-weight: 600;
-        }
-        #foulTable{
-            width:360px;
-        }
-        .hint{
-            color:#888;
-            font-size:12px;
-        }
-        #statusBar{
-            margin:15px 0;
-            padding:10px 12px;
-            border:1px solid #e0e0e0;
-            background:#f8f9fa;
-            border-radius:8px;
-            color:#444;
-            min-height: 20px;
-            font-weight: 500;
+        #statusBar.ok { background: #E6F1FB; border-color: #B5D4F4; color: #0C447C; }
+        #statusBar.warn { background: #FAEEDA; border-color: #FAC775; color: #633806; }
+        #statusBar.bad { background: #FCEBEB; border-color: #F7C1C1; color: #791F1F; }
+        #statusBar.busy { background: #EEEDFE; border-color: #CECBF6; color: #3C3489; }
+
+        .notice {
+            display: none; padding: 8px 12px; border-radius: 9px; font-size: 12px;
+            background: #FCEBEB; border: 1px solid #F7C1C1; color: #791F1F;
         }
 
-        .game-over {
-            background: #fff3cd !important;
-            border-color: #ffeaa7 !important;
-            color: #856404 !important;
-            font-weight: bold !important;
-        }
+        h3 { margin: 0 0 8px; font-size: 13px; font-weight: 500; color: #5F5E5A; }
 
-        .win-message {
-            background: #d1ecf1 !important;
-            border-color: #bee5eb !important;
-            color: #0c5460 !important;
-        }
+        .sections { display: flex; gap: 12px; }
+        .sections > div { flex: 1; }
+        #moveList { list-style: none; margin: 0; padding: 0; max-height: 150px; overflow-y: auto; font-size: 13px; }
+        #moveList li { display: flex; gap: 8px; padding: 2px 0; }
+        #moveList .rn { color: #888780; width: 26px; flex: 0 0 auto; }
+        #moveList .mv { width: 76px; }
+        #moveList .mv.ai { color: #993C1D; }
+        #moveList .mv.me { color: #0C447C; }
+        #foulList { list-style: none; margin: 0; padding: 0; max-height: 100px; overflow-y: auto; font-size: 12px; color: #A32D2D; }
 
-        .lose-message {
-            background: #f8d7da !important;
-            border-color: #f5c6cb !important;
-            color: #721c24 !important;
-        }
+        .chatHead { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 500; }
+        .dot { width: 8px; height: 8px; border-radius: 50%; background: #639922; }
+        .dot.off { background: #B4B2A9; }
+        .chatHead .sub { font-size: 12px; font-weight: 400; color: #888780; }
 
-        #rightCol {
-            display: flex;
-            flex-direction: column;
-            gap: 25px;
-            margin-left: 60px;
+        #chatLog { height: 420px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-right: 4px; }
+        .msg { display: flex; flex-direction: column; max-width: 92%; }
+        .msg.user { align-self: flex-end; align-items: flex-end; }
+        .msg.coach { align-self: flex-start; }
+        .bubble {
+            padding: 9px 12px; border-radius: 12px; font-size: 13px; line-height: 1.65;
+            white-space: pre-wrap; word-break: break-word;
         }
+        .msg.user .bubble { background: #185FA5; color: #fff; border-bottom-right-radius: 4px; }
+        .msg.coach .bubble { background: #F1EFE8; border: 1px solid #e3e1d8; border-bottom-left-radius: 4px; }
+        .msg .tag { font-size: 11px; color: #888780; margin-bottom: 3px; }
+        .thinking .bubble::after { content: "…"; animation: blink 1.2s infinite; }
+        @keyframes blink { 0%,100% { opacity: .25; } 50% { opacity: 1; } }
 
-        .game-container {
-            display: flex;
-            justify-content: space-between;
-            width: 100%;
+        .chatInput { display: flex; gap: 8px; }
+        .chatInput input {
+            flex: 1; padding: 9px 12px; border-radius: 9px; border: 1px solid #ddd;
+            font-size: 13px; font-family: inherit;
         }
+        .chatInput input:focus { outline: 2px solid #B5D4F4; border-color: #185FA5; }
+        .quick { display: flex; gap: 6px; flex-wrap: wrap; }
+        .quick button { font-size: 12px; padding: 5px 10px; background: #f7f7f9; }
+        .hint { font-size: 12px; color: #888780; }
 
-        #gameOverMessage {
-            display: none;
-            padding: 12px 16px;
-            border-radius: 8px;
-            font-weight: 500;
-            text-align: center;
+        /* 开局选边 */
+        .overlay {
+            position: fixed; inset: 0; background: rgba(40,40,38,.42);
+            display: none; align-items: center; justify-content: center; z-index: 20;
         }
+        .overlay.show { display: flex; }
+        .overlay .panel {
+            background: #fff; border-radius: 16px; padding: 28px 32px; width: 380px;
+            box-shadow: 0 18px 50px rgba(0,0,0,.22); text-align: center;
+        }
+        .overlay h2 { margin: 0 0 6px; font-size: 19px; }
+        .overlay p { margin: 0 0 20px; font-size: 13px; color: #6b6a66; line-height: 1.7; }
+        .sideBtns { display: flex; gap: 12px; }
+        .sideBtn {
+            flex: 1; padding: 18px 10px; border-radius: 12px; font-size: 14px; font-weight: 500;
+            border: 1px solid #ddd; line-height: 1.9;
+        }
+        .sideBtn.red { border-color: #E8B4B4; background: #FDF2F2; color: #A32D2D; }
+        .sideBtn.black { border-color: #C9C9C4; background: #F4F4F2; color: #3a3a37; }
+        .sideBtn small { display: block; font-size: 11px; font-weight: 400; opacity: .75; }
+        .sideBtn.wide { width: 100%; margin-top: 12px; padding: 12px 10px; flex: none; }
     </style>
 </head>
 <body>
-<div id="gameArea">
-    <div class="game-container">
-        <div id="leftCol">
+<div class="app">
+    <section class="left">
+        <div class="card toolbar">
+            <button id="btnEngine" class="primary" title="让电脑替现在该走的一方走一步。电脑不会自动出手，想让它走就点这里">电脑走一步</button>
+            <button id="btnUndo" title="退回最近的一手。电脑替你应过一手时，会把它的应招和你上一步一起退掉；次数不限，可以一直退到开局">悔棋</button>
+            <button id="btnNew" title="重新开一局">新局</button>
+            <button id="btnSwitch" title="改成我执另一方：棋盘翻过来，教练也换个称呼（不会自动走棋）">换边</button>
+            <button id="btnFlip" title="只是把棋盘转过来看，不换我执哪边">翻转视角</button>
+            <button id="btnSetup" title="自己摆一个局面再开打">自己摆棋</button>
+            <button id="btnRules" title="看看棋叔能帮你做什么">使用说明</button>
+            <button id="btnSound" title="落子音效开关">🔊 音效</button>
+        </div>
+        <div class="card" style="padding:0;border:none;background:transparent">
             <canvas id="board" width="450" height="500"></canvas>
-            <div class="toolbar">
-                <button onclick="newGame()">New Game</button>
-                <span class="hint">Red moves first: Click to select piece, then click target square</span>
+        </div>
+        <div id="statusBar">正在准备棋盘…</div>
+        <div id="notice" class="notice"></div>
+        <div class="card sections">
+            <div>
+                <h3>棋谱</h3>
+                <ol id="moveList"></ol>
+            </div>
+            <div>
+                <h3>违规记录</h3>
+                <ul id="foulList"></ul>
             </div>
         </div>
+    </section>
 
-        <div id="rightCol">
-            <div id="statusBar">Status: Game preparing...</div>
-
-            <div id="gameOverMessage"></div>
-
-            <h3>Foul Records</h3>
-            <table id="foulTable">
-                <thead><tr><th>#</th><th>Type</th></tr></thead>
-                <tbody id="foulBody"></tbody>
-            </table>
+    <section class="right">
+        <div class="card" style="display:flex;flex-direction:column;gap:12px">
+            <div class="chatHead">
+                <span class="dot" id="coachDot"></span>
+                <span>棋叔 · 你的象棋教练</span>
+                <span class="sub" id="coachState"></span>
+            </div>
+            <div id="chatLog"></div>
+            <div class="chatInput">
+                <input id="chatInput" placeholder="问问棋叔：这步该怎么走？" autocomplete="off"/>
+                <button id="btnSend" class="primary">发送</button>
+            </div>
+            <div class="quick">
+                <button data-q="我这一步该怎么走？">我该怎么走</button>
+                <button data-q="现在盘面形势怎么样？">形势如何</button>
+                <button data-q="刚才那一步为什么不好？">刚才错在哪</button>
+                <button data-q="这盘我哪里出了问题？">整体复盘</button>
+            </div>
+            <div class="hint">棋叔会看着棋盘回答你，走了亏棋会主动提醒。</div>
         </div>
+    </section>
+</div>
+
+<div class="overlay" id="startOverlay">
+    <div class="panel">
+        <h2 id="startTitle">选一边，开始下棋</h2>
+        <p id="startDesc">红黑两边都归你走，想请电脑出招就点「电脑走一步」<br/>你走亏了棋，棋叔会主动开口</p>
+        <div class="sideBtns">
+            <button class="sideBtn red" data-side="RED">我执红<small>红方在下方</small></button>
+            <button class="sideBtn black" data-side="BLACK">我执黑<small>黑方在下方</small></button>
+        </div>
+        <button class="sideBtn wide" id="btnGotoSetup">自己摆一个局面<small>指定盘面、轮到谁走、你执哪边</small></button>
+        <div class="hint" id="startHint" style="margin-top:14px"></div>
     </div>
 </div>
 
+<script src="/xq/xq-render.js"></script>
 <script>
-    /* ========== Canvas & DPR ========== */
-    const cvs = document.getElementById('board');
-    const ctx = cvs.getContext('2d');
-    const DPR = window.devicePixelRatio || 1;
-    const LOGICAL_W = 450, LOGICAL_H = 500;
-    cvs.style.width  = LOGICAL_W + 'px';
-    cvs.style.height = LOGICAL_H + 'px';
-    cvs.width  = Math.round(LOGICAL_W * DPR);
-    cvs.height = Math.round(LOGICAL_H * DPR);
-    ctx.scale(DPR, DPR);
+/* ================= 画布 ================= */
+const API = '/api/game';
 
-    /* ========== Fixed padding ========== */
-    const PAD_L = 24, PAD_R = 24, PAD_T = 22, PAD_B = 22;
+const cvs = document.getElementById('board');
+const ctx = cvs.getContext('2d');
+const DPR = window.devicePixelRatio || 1;
+cvs.style.width = XQ.W + 'px';
+cvs.style.height = XQ.H + 'px';
+cvs.width = Math.round(XQ.W * DPR);
+cvs.height = Math.round(XQ.H * DPR);
 
-    /* ========== Geometry ========== */
-    const OUT_W = LOGICAL_W, OUT_H = LOGICAL_H;
-    const COLS = 9, ROWS = 10;
-    const INNER_X = PAD_L;
-    const INNER_Y = PAD_T;
-    const INNER_W = OUT_W - PAD_L - PAD_R;
-    const INNER_H = OUT_H - PAD_T - PAD_B;
-    const CELL_W  = INNER_W / COLS;
-    const CELL_H  = INNER_H / ROWS;
+const COLS = XQ.COLS, ROWS = XQ.ROWS, R_PIECE = XQ.R_PIECE;
 
-    /* ========== Resources & Game state ========== */
-    const RED='r', BLACK='b';
-    const SPRITES = {
-        board: '/images/MAIN.GIF',
-        RR:'/images/RR.GIF', RN:'/images/RN.GIF', RB:'/images/RB.GIF',
-        RA:'/images/RA.GIF', RK:'/images/RK.GIF', RC:'/images/RC.GIF', RP:'/images/RP.GIF',
-        BR:'/images/BR.GIF', BN:'/images/BN.GIF', BB:'/images/BB.GIF',
-        BA:'/images/BA.GIF', BK:'/images/BK.GIF', BC:'/images/BC.GIF', BP:'/images/BP.GIF',
-    };
-    const IMGS = {};
-    function loadImage(src){ return new Promise(r=>{ const i=new Image(); i.onload=()=>r(i); i.onerror=()=>r(null); i.src=src; }); }
-    async function preload(){
-        IMGS.board = await loadImage(SPRITES.board);
-        await Promise.all(Object.keys(SPRITES).filter(k=>k!=='board').map(async k=>IMGS[k]=await loadImage(SPRITES[k])));
+/* ================= 全局状态 ================= */
+let board = emptyBoard();
+let state = {
+    playerSide: null, turn: null, gameOver: false, winner: null,
+    lastMove: null, inCheck: false, playerInCheck: false,
+    engineAvailable: true, coachAvailable: true
+};
+let selected = null;     // 选中的棋子 {r,c}
+let targets = [];        // 合法落点
+let flipped = false;     // 棋盘是否翻转（我执黑时黑方在下方）
+let busy = false;        // 走子/开局进行中
+let chatBusy = false;    // 提问进行中
+
+/** 本地已经演过动画的那一手，避免服务端回来再演一遍 */
+let localPlayed = null;
+/** 服务端上一轮的着数，用来判断"是不是刚多走了一手" */
+let serverMoveCount = -1;
+
+function emptyBoard() {
+    return Array.from({length: ROWS}, () => Array(COLS).fill(null));
+}
+
+/* ================= 绘制 ================= */
+/**
+ * 整帧绘制。棋盘和棋子都是程序画的，所以位置/缩放/旋转/透明度
+ * 都能逐帧插值 —— 走子动画、拖尾、轨迹都从这里长出来。
+ */
+function paint(ts) {
+    const shake = XQ.shakeOffset(ts);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.clearRect(0, 0, XQ.W, XQ.H);
+    ctx.save();
+    ctx.translate(shake.x, shake.y);
+
+    XQ.paintBoardLayer(ctx);
+
+    // 上一手走过的两格垫一层暖色：终点重一点，一眼看出刚动了哪
+    if (state.lastMove) {
+        XQ.paintCellTint(ctx, state.lastMove.fromR, state.lastMove.fromC, flipped, 'rgba(186,117,23,.12)');
+        XQ.paintCellTint(ctx, state.lastMove.toR, state.lastMove.toC, flipped, 'rgba(186,117,23,.22)');
     }
-    function imgKeyOf(p){
-        if(!p) return null;
-        const mapR = {R:'RR', H:'RN', E:'RB', A:'RA', K:'RK', C:'RC', P:'RP'};
-        const mapB = {R:'BR', H:'BN', E:'BB', A:'BA', K:'BK', C:'BC', P:'BP'};
-        return p.s===RED ? mapR[p.t] : mapB[p.t];
+
+    // 棋子底下：走子的轨迹残影、被打飞的子
+    XQ.paintUnderPieces(ctx, ts);
+
+    // 将军：轮到的那一方老将脚下冒红光
+    if (state.inCheck && state.turn) {
+        const king = findKing(state.turn);
+        if (king) XQ.paintCheckPulse(ctx, king.r, king.c, flipped, ts);
     }
+    if (selected) XQ.paintSelection(ctx, selected.r, selected.c, flipped, ts);
+    XQ.paintMoveTargets(ctx, board, flipped, targets);
 
-    let board = initialBoard();
-    let select = null;
-    let locked = false;
-    let gameStatus = 'preparing';
-
-    /* —— Memory rows for CSV —— */
-    let foulRows  = []; // Each row: [#, Type]
-
-    function initialBoard(){
-        const B = Array.from({length:ROWS}, ()=>Array(COLS).fill(null));
-        // Black
-        put(B,0,0,BLACK,'R'); put(B,0,1,BLACK,'H'); put(B,0,2,BLACK,'E'); put(B,0,3,BLACK,'A'); put(B,0,4,BLACK,'K');
-        put(B,0,5,BLACK,'A'); put(B,0,6,BLACK,'E'); put(B,0,7,BLACK,'H'); put(B,0,8,BLACK,'R');
-        put(B,2,1,BLACK,'C'); put(B,2,7,BLACK,'C');
-        for(let c=0;c<9;c+=2) put(B,3,c,BLACK,'P');
-        // Red
-        put(B,9,0,RED,'R'); put(B,9,1,RED,'H'); put(B,9,2,RED,'E'); put(B,9,3,RED,'A'); put(B,9,4,RED,'K');
-        put(B,9,5,RED,'A'); put(B,9,6,RED,'E'); put(B,9,7,RED,'H'); put(B,9,8,RED,'R');
-        put(B,7,1,RED,'C'); put(B,7,7,RED,'C');
-        for(let c=0;c<9;c+=2) put(B,6,c,RED,'P');
-        return B;
-    }
-    function put(B,r,c,s,t){ B[r][c]={s,t}; }
-
-    /* ========== Drawing ========== */
-    function drawPieces(){
-        const size = Math.min(CELL_W, CELL_H) * 0.86, rds = size/2;
-        for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){
-            const p = board[r][c]; if(!p) continue;
-            const x = INNER_X + c*CELL_W + CELL_W/2;
-            const y = INNER_Y + r*CELL_H + CELL_H/2;
-            const key = imgKeyOf(p), sp = IMGS[key];
-            if(sp){ ctx.drawImage(sp, x-rds, y-rds, size, size); }
-            else{
-                ctx.beginPath(); ctx.arc(x,y,rds,0,Math.PI*2); ctx.fillStyle='#fff'; ctx.fill(); ctx.stroke();
-                ctx.fillStyle = (p.s===RED)?'#c00':'#222';
-                ctx.font='bold 20px system-ui'; ctx.textAlign='center'; ctx.textBaseline='middle';
-                const glyph={R:'车',H:'马',E:'相',A:'仕',K:'帅',C:'炮',P:'兵'}[p.t]||'?';
-                ctx.fillText(glyph,x,y);
-            }
+    // 静态棋子：正在飞的那一格先空着，落点交给动画补
+    const flying = XQ.flyingCells();
+    for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+            const code = board[r][c];
+            if (!code || flying.has(r + ',' + c)) continue;
+            const pos = XQ.center(r, c, flipped);
+            XQ.drawPiece(ctx, pos.x, pos.y, R_PIECE, code);
         }
     }
-    function draw(){
-        ctx.clearRect(0,0,OUT_W,OUT_H);
-        if(IMGS.board){ ctx.drawImage(IMGS.board, 0, 0, OUT_W, OUT_H); }
-        if(select){
-            ctx.fillStyle='rgba(0,128,255,.12)';
-            ctx.fillRect(INNER_X + select.c*CELL_W, INNER_Y + select.r*CELL_H, CELL_W, CELL_H);
+
+    // 棋子上面：飞行中的棋子、落子涟漪、吃子迸溅
+    XQ.paintEffects(ctx, ts);
+    ctx.restore();
+}
+
+/** 找某个方的老将，用来画将军提示 */
+function findKing(side) {
+    const target = side === 'RED' ? 'K' : 'k';
+    for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+            if (board[r][c] === target) return {r, c};
         }
-        drawPieces();
+    }
+    return null;
+}
+
+/** 只让界面重画一帧，不参与任何棋局逻辑 */
+function render() { loop.invalidate(); }
+const loop = XQ.createLoop(paint);
+
+/* ================= 交互 ================= */
+cvs.addEventListener('click', async e => {
+    if (busy || chatBusy) return;
+    if (state.gameOver) { setStatus('本局已经结束，点「新局」再来一盘', 'warn'); return; }
+    if (!state.turn) { setStatus('先选边开一局', 'warn'); return; }
+
+    const cell = XQ.hit(e.clientX, e.clientY, cvs, flipped);
+    if (!cell) return;
+
+    // 点到了合法落点 -> 走子
+    if (selected && targets.some(t => t.r === cell.r && t.c === cell.c)) {
+        const from = {...selected};
+        selected = null; targets = [];
+        await doMove(from, cell);
+        return;
     }
 
-    /* ========== Click detection ========== */
-    function hitToCell(x,y){
-        const gx = x - INNER_X, gy = y - INNER_Y;
-        if(gx < 0 || gy < 0 || gx > INNER_W || gy > INNER_H) return null;
-        const c = Math.floor(gx / CELL_W);
-        const r = Math.floor(gy / CELL_H);
-        if(c<0||c>=COLS||r<0||r>=ROWS) return null;
-        return {r,c};
+    // 红黑都能走：只要这个子属于「现在该走的那一方」，就选中它
+    const code = board[cell.r][cell.c];
+    if (code && sideOf(code) === state.turn) {
+        await select(cell);
+    } else {
+        selected = null; targets = [];
+        render();
     }
+});
 
-    cvs.addEventListener('click', async e=>{
-        if (locked || gameStatus === 'finished') return;
-        const rect = cvs.getBoundingClientRect();
-        const x = (e.clientX - rect.left);
-        const y = (e.clientY - rect.top);
-        const cell = hitToCell(x,y);
-        if(!cell) return;
+/** 棋子字母属于哪一方：大写是红，小写是黑 */
+function sideOf(code) {
+    return code === code.toUpperCase() ? 'RED' : 'BLACK';
+}
 
-        const {r,c} = cell;
-        if(!select){
-            const p = board[r][c];
-            if(p && p.s===RED){ select={r,c}; draw(); }
-            return;
-        }else{
-            const from = {...select};
-            select = null; draw();
-            if(from.r===r && from.c===c) return;
-            await doMove(from.r, from.c, r, c);
-        }
+/** 棋盘朝我这边时，我执的那一方是不是现在该走的一方 */
+function isMyTurn() {
+    return !!state.turn && state.turn === state.playerSide;
+}
+
+/** 走子/开局期间锁住界面，「电脑走一步」的可用状态也跟着变 */
+function setBusy(value) {
+    busy = value;
+    renderEngineButton();
+    renderUndoButton();
+}
+
+async function select(cell) {
+    selected = {r: cell.r, c: cell.c};
+    targets = [];
+    render();
+    try {
+        const d = await getJSON(`${API}/legal/${sessionId}?r=${cell.r}&c=${cell.c}`);
+        if (Array.isArray(d.targets)) targets = d.targets;
+    } catch (err) {
+        /* 落点提示失败不影响走子，服务端仍会校验 */
+    }
+    render();
+}
+
+/* ================= 与服务端交互 ================= */
+const sessionId = (() => {
+    const saved = sessionStorage.getItem('hong-coach-session');
+    if (saved) return saved;
+    const id = 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+    sessionStorage.setItem('hong-coach-session', id);
+    return id;
+})();
+
+async function postJSON(url, body) {
+    const res = await fetch(url, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body || {})
     });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return res.json();
+}
+async function getJSON(url) {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return res.json();
+}
 
-    /* ========== UCI application & tables ========== */
-    function applyUci(uci){
-        if (!uci || uci.length < 4) return;
-        const fromC = uci.charCodeAt(0) - 97;
-        const fromR = 9 - parseInt(uci[1],10);
-        const toC   = uci.charCodeAt(2) - 97;
-        const toR   = 9 - parseInt(uci[3],10);
-        const p = board[fromR][fromC];
-        if(!p) return;
-        board[toR][toC] = p;
-        board[fromR][fromC] = null;
-    }
-    function pushFoul(cnt, type = 'Illegal move'){
-        document.getElementById('foulBody')
-            .insertAdjacentHTML('beforeend', `<tr><td>${cnt}</td><td>${type}</td></tr>`);
-        foulRows.push([cnt, type]);
-    }
+/* ================= 开局 ================= */
+function showStartPanel(hint) {
+    document.getElementById('startHint').textContent = hint || '';
+    document.getElementById('startOverlay').classList.add('show');
+}
+function hideStartPanel() {
+    document.getElementById('startOverlay').classList.remove('show');
+}
 
-    /* ========== Status updates ========== */
-    function updateStatusBar(message, type = 'normal') {
-        const bar = document.getElementById('statusBar');
-        bar.textContent = `Status: ${message}`;
-        bar.className = '';
-        if (type === 'game-over') bar.classList.add('game-over');
-        if (type === 'win-message') bar.classList.add('win-message');
-        if (type === 'lose-message') bar.classList.add('lose-message');
+async function startGame(side) {
+    hideStartPanel();
+    setBusy(true);
+    setStatus('正在摆棋…', 'busy');
+    try {
+        const d = await postJSON(`${API}/new/${sessionId}`, {playerSide: side});
+        applyState(d);
+        if (d.result === 'no_session' || d.result === 'error') {
+            showStartPanel(d.message || '开局失败，请重试');
+            return;
+        }
+        if (!d.engineAvailable) {
+            showNotice('象棋引擎未就绪：棋子仍然可以自己走，「电脑走一步」用不了。请检查 engine 配置或 resources/engine 目录。');
+        }
+    } catch (err) {
+        setStatus('开局失败：' + err.message, 'bad');
+        showStartPanel('连不上服务，请确认应用已启动');
+    } finally {
+        setBusy(false);
     }
+}
 
-    function showGameOverMessage(message, isWin = false) {
-        const messageDiv = document.getElementById('gameOverMessage');
-        messageDiv.textContent = message;
-        messageDiv.style.display = 'block';
-        if (isWin) {
-            messageDiv.classList.add('win-message');
-            messageDiv.classList.remove('lose-message');
+/**
+ * 换边：改成我执另一方（棋盘朝向随之翻转，教练也换个称呼）。
+ * 棋局一步都不动，回合还是原来的回合 —— 这里只管刷新界面。
+ */
+async function switchSide() {
+    if (busy || chatBusy) return;
+    if (!state.playerSide) { setStatus('先选边开一局，再来换边', 'warn'); return; }
+    setBusy(true);
+    setStatus('正在换边…', 'busy');
+    try {
+        const d = await postJSON(`${API}/switch/${sessionId}`, {});
+        if (d.result === 'no_session') {
+            showNotice('这局已经过期，请重新选边开局。');
+            showStartPanel();
+            return;
+        }
+        applyState(d);
+    } catch (err) {
+        setStatus('换边失败：' + err.message, 'bad');
+    } finally {
+        setBusy(false);
+    }
+}
+
+/** 进入页面先问服务端：这局还在吗？在就恢复，不在才让用户选边 */
+async function boot() {
+    try {
+        const d = await getJSON(`${API}/state/${sessionId}`);
+        if (d.result === 'state') {
+            applyState(d);
+            return;
+        }
+    } catch (err) {
+        /* 拿不到状态就当作新对局处理 */
+    }
+    showStartPanel();
+}
+
+/** 一手的身份：起终点一样就算同一手，用来判断动画有没有演过 */
+function keyOfMove(m) {
+    return m ? `${m.fromR},${m.fromC}-${m.toR},${m.toC}` : null;
+}
+
+/**
+ * 本地落子 + 播动画。
+ * <p>
+ * 走的是什么子、吃的是什么子，必须<b>在改盘面之前</b>记下来 ——
+ * 改完盘面就只剩"终点有子"这一个事实，来源和战果都丢了。
+ */
+function playLocalMove(from, to) {
+    const moving = board[from.r][from.c];
+    const captured = board[to.r][to.c];
+    board[to.r][to.c] = moving;
+    board[from.r][from.c] = null;
+    state.lastMove = {fromR: from.r, fromC: from.c, toR: to.r, toC: to.c};
+    localPlayed = keyOfMove(state.lastMove);
+    XQ.playMove({from: {r: from.r, c: from.c}, to: {r: to.r, c: to.c},
+        code: moving, captured: captured, flipped: flipped});
+}
+
+async function doMove(from, to) {
+    setBusy(true);
+    setStatus('正在走棋…', 'busy');
+    // 先在本地落子并马上播动画，界面即时响应；随后用服务端盘面校正
+    playLocalMove(from, to);
+    selected = null; targets = [];
+    render();
+
+    try {
+        const d = await postJSON(`${API}/move/${sessionId}`, {
+            fromR: from.r, fromC: from.c, toR: to.r, toC: to.c
+        });
+        if (d.result === 'no_session') {
+            showNotice('这局已经过期，请重新选边开局。');
+            showStartPanel();
+            return;
+        }
+        applyState(d);
+
+        if (d.result === 'foul') {
+            addMsg('coach', d.message || '这一步走不了，换一步试试。', '提示');
+        } else if (d.result === 'ok') {
+            // 电脑不会自动应招；要不要它出手，看用户点不点「电脑走一步」
+            if (d.coachTriggered) await fetchCoachComment();
+        } else if (d.result === 'game_over') {
+            addMsg('coach', '这盘结束了，我们复盘看看。', '对局结束');
+        }
+    } catch (err) {
+        setStatus('走子失败：' + err.message, 'bad');
+    } finally {
+        setBusy(false);
+    }
+}
+
+/**
+ * 让电脑替现在该走的一方走一步。
+ * 轮到哪一方就替哪一方走 —— 我执红时也可以让电脑替我走红方的棋，纯粹是一个「出招」的按钮。
+ */
+async function engineMoveOnce() {
+    if (busy || chatBusy) return;
+    if (!state.playerSide) { setStatus('先选边开一局', 'warn'); return; }
+    if (state.gameOver) { setStatus('本局已经结束，点「新局」再来一盘', 'warn'); return; }
+    if (!state.engineAvailable) { setStatus('引擎未就绪，电脑走不了', 'bad'); return; }
+
+    setBusy(true);
+    setStatus('电脑正在想这一步…', 'busy');
+    try {
+        const d = await postJSON(`${API}/engine/${sessionId}`, {});
+        if (d.result === 'no_session') {
+            showNotice('这局已经过期，请重新选边开局。');
+            showStartPanel();
+            return;
+        }
+        applyState(d);
+        if (d.result === 'engine_no_move') {
+            addMsg('coach', d.message || '这一步电脑走不出来。', '提示');
+        }
+    } catch (err) {
+        setStatus('电脑走子失败：' + err.message, 'bad');
+    } finally {
+        setBusy(false);
+    }
+}
+
+/**
+ * 悔棋。次数不限，能一路退到这一局开局那个局面。
+ * <p>
+ * 退几手由服务端说了算 —— 电脑应过一手时，它会把应招和你上一步一起退掉，
+ * 一次点击就回到你落子之前。这里只管把盘面换成退回来的样子、告诉用户退了什么。
+ */
+async function undoMove() {
+    if (busy || chatBusy) return;
+    if (!state.playerSide) { setStatus('先选边开一局', 'warn'); return; }
+    if (serverMoveCount <= 0) { setStatus('已经退到开局了，没有可悔的棋', 'warn'); return; }
+
+    setBusy(true);
+    setStatus('正在悔棋…', 'busy');
+    try {
+        const d = await postJSON(`${API}/undo/${sessionId}`, {});
+        if (d.result === 'no_session') {
+            showNotice('这局已经过期，请重新选边开局。');
+            showStartPanel();
+            return;
+        }
+        // 正在飞的棋子记的是还没悔回去的坐标，先清干净再换盘面，免得残影飘在错的地方
+        XQ.clearEffects();
+        applyState(d);
+        const nothing = d.result === 'nothing_to_undo';
+        // 放在 applyState 之后：那边也会刷状态栏，谁后写谁算数
+        setStatus(nothing ? '已经退到开局了，没有可悔的棋' : (d.message || '已悔棋'),
+            nothing ? 'warn' : 'ok');
+    } catch (err) {
+        setStatus('悔棋失败：' + err.message, 'bad');
+    } finally {
+        setBusy(false);
+    }
+}
+
+async function fetchCoachComment() {
+    const placeholder = addThinking('棋叔正在复盘这一步…');
+    try {
+        const d = await postJSON(`${API}/coach/${sessionId}`, {});
+        if (Array.isArray(d.chat)) {
+            renderChat(d.chat);          // 服务端是对话记录的唯一来源
         } else {
-            messageDiv.classList.add('lose-message');
-            messageDiv.classList.remove('win-message');
+            placeholder.remove();
+            if (d.comment) addMsg('coach', d.comment, '点评');
         }
+    } catch (err) {
+        placeholder.remove();
+        addMsg('coach', '复盘失败：' + err.message, '提示');
     }
+}
 
-    function hideGameOverMessage() {
-        document.getElementById('gameOverMessage').style.display = 'none';
-        document.getElementById('gameOverMessage').className = '';
-    }
-
-    /* ========== Game control ========== */
-    async function newGame(){
-        // Reset state
-        foulRows  = [];
-        locked = false;
-        gameStatus = 'playing';
-
-        await fetch('/api/xq/new', {method:'POST'});
-        board = initialBoard();
-        select = null;
-
-        document.getElementById('foulBody').innerHTML = '';
-        updateStatusBar('Game started - Red moves first');
-        hideGameOverMessage();
-        draw();
-    }
-
-    /* ========== Backend communication ========== */
-    async function doMove(fromR,fromC,toR,toC){
-        try{
-            const res = await fetch('/api/xq/move',{
-                method:'POST',
-                headers:{'Content-Type':'application/json'},
-                body:JSON.stringify({fromR,fromC,toR,toC})
-            });
-            const data = await res.json();
-            handleMoveResult(data);
-
-        }catch(err){
-            alert('Communication failed: ' + err);
-        }
-    }
-
-    function handleMoveResult(data) {
-        const bar = document.getElementById('statusBar');
-
-        if (data.result === 'game_over') {
-            locked = true;
-            gameStatus = 'finished';
-            handleGameResult(data);
+async function sendChat(question) {
+    addMsg('user', question);
+    addThinking('棋叔正在看棋盘…');
+    chatBusy = true;
+    try {
+        const d = await postJSON(`${API}/chat/${sessionId}`, {question});
+        if (d.result === 'no_session') {
+            showNotice('这局已经过期，请重新选边开局。');
+            showStartPanel();
             return;
         }
-
-        if(data.result === 'foul'){
-            pushFoul(data.foulCount, data.message || 'Illegal move');
-            updateStatusBar('Illegal move! Please choose a legal move', 'lose-message');
-            return;
+        if (Array.isArray(d.chat)) {
+            renderChat(d.chat);
+        } else {
+            addMsg('coach', d.answer || '我一时没想好，你再问我一次。');
         }
+    } catch (err) {
+        addMsg('coach', '回答失败：' + err.message);
+    } finally {
+        chatBusy = false;
+    }
+}
 
-        if(data.result === 'ok'){
-            // Apply moves
-            applyUci(data.playerMove);
-            if (data.aiMove) applyUci(data.aiMove);
-            draw();
+/* ================= 状态同步 ================= */
+function applyState(d) {
+    // 先判断这一帧要不要播动画：只有"正正好多走了一手、而且本地没演过"才演。
+    // 这个条件把"电脑走一步""换边""刷新恢复""重开局"几种情况分得很干净。
+    const incoming = d.lastMove;
+    const grew = typeof d.moveCount === 'number' && d.moveCount === serverMoveCount + 1;
+    const selfPlayed = incoming && localPlayed === keyOfMove(incoming);
+    const pending = (incoming && grew && !selfPlayed
+        && board[incoming.fromR] && board[incoming.fromR][incoming.fromC])
+        ? {code: board[incoming.fromR][incoming.fromC], captured: board[incoming.toR][incoming.toC]}
+        : null;
+    if (!grew) localPlayed = null;          // 被服务端否掉的那一手就此作废
+    if (typeof d.moveCount === 'number') serverMoveCount = d.moveCount;
 
-            // Handle check status
-            if (data.meInCheck) {
-                updateStatusBar('You are in check! Please resolve check', 'game-over');
-            } else if (data.oppInCheck) {
-                updateStatusBar('Opponent is in check', 'normal');
-            } else {
-                updateStatusBar('In progress', 'normal');
-            }
-        }
+    if (Array.isArray(d.board)) board = d.board;
+    if (d.playerSide) {
+        const sideChanged = state.playerSide !== d.playerSide;
+        state.playerSide = d.playerSide;
+        localStorage.setItem('hong-coach-side', d.playerSide);
+        if (sideChanged) flipped = (d.playerSide === 'BLACK');
+    }
+    if (d.turn) state.turn = d.turn;
+    state.gameOver = !!d.gameOver;
+    state.winner = d.winner || null;
+    state.inCheck = !!d.inCheck;
+    state.playerInCheck = !!d.playerInCheck;
+    if ('lastMove' in d) state.lastMove = d.lastMove;
+    if ('engineAvailable' in d) state.engineAvailable = d.engineAvailable;
+    if ('coachAvailable' in d) state.coachAvailable = d.coachAvailable;
+
+    // 盘面已经换成新的了，这时候补播动画才画得对：终点那一格会被动画接管
+    if (pending) {
+        XQ.playMove({from: {r: incoming.fromR, c: incoming.fromC},
+            to: {r: incoming.toR, c: incoming.toC},
+            code: pending.code, captured: pending.captured, flipped: flipped});
     }
 
-    function handleGameResult(data) {
-        locked = true;
-        gameStatus = 'finished';
+    renderMoves(d.moves || []);
+    renderFouls(d.fouls || []);
+    if (Array.isArray(d.chat)) renderChat(d.chat);
+    renderCoachState();
+    renderEngineButton();
+    renderUndoButton();
+    updateNotice(d);
+    updateStatus(d);
+    selected = null; targets = [];
+    render();
+}
 
-        let message = data.resultDescription || data.gameResult || 'Game over';
-        let isWin = false;
+/** 「电脑走一步」什么时候点得动：有对局、没结束、引擎还在 */
+function renderEngineButton() {
+    const btn = document.getElementById('btnEngine');
+    btn.disabled = busy || !state.playerSide || state.gameOver || !state.engineAvailable;
+    const turnText = state.turn === 'RED' ? '红方' : '黑方';
+    btn.textContent = state.turn && !state.gameOver ? `电脑走一步（替${turnText}）` : '电脑走一步';
+}
 
-        if (data.result === 'game_over') {
-            if (data.winner === 'RED') {
-                message = 'Congratulations! You checkmated the AI!';
-                isWin = true;
-            } else if (data.winner === 'BLACK') {
-                message = 'AI checkmated you!';
-            } else {
-                message = data.gameResult || 'Draw!';
-            }
-        }
+/** 「悔棋」什么时候点得动：有对局，而且盘上确实还有棋可悔 */
+function renderUndoButton() {
+    const btn = document.getElementById('btnUndo');
+    btn.disabled = busy || !state.playerSide || serverMoveCount <= 0;
+}
 
-        updateStatusBar(message, isWin ? 'win-message' : 'lose-message');
-        showGameOverMessage(message, isWin);
-
-        // Apply any unapplied moves
-        if (data.playerMove) applyUci(data.playerMove);
-        if (data.aiMove) applyUci(data.aiMove);
-        draw();
-
-        // CSV auto export, no alerts shown
+function updateStatus(d) {
+    if (state.gameOver) {
+        const text = d.resultText ? d.resultText : '本局结束';
+        setStatus(text + '（点「新局」再来一盘）', d.winner === state.playerSide ? 'ok' : 'warn');
+        return;
+    }
+    if (!state.playerSide) { setStatus('先选边开一局', 'warn'); return; }
+    if (!state.engineAvailable) {
+        setStatus('引擎未就绪：棋子仍然可以自己走，「电脑走一步」暂时不可用', 'bad');
+        return;
     }
 
-    /* ========== Startup ========== */
-    (async function(){
-        await preload();
-        await newGame();
-    })();
+    const turnText = state.turn === 'RED' ? '红方' : '黑方';
+    if (isMyTurn() && state.playerInCheck) {
+        setStatus(`你执的${turnText}正被将军，先解将`, 'bad');
+        return;
+    }
+    if (state.inCheck) {
+        setStatus(`${turnText}正被将军，必须先解将`, 'warn');
+        return;
+    }
+    setStatus(`轮到${turnText}走棋${isMyTurn() ? '（你执' + turnText + '）' : ''}`
+        + '：点棋子自己走，或点「电脑走一步」', isMyTurn() ? 'ok' : '');
+}
+
+function setStatus(text, kind) {
+    const bar = document.getElementById('statusBar');
+    bar.textContent = text;
+    bar.className = kind || '';
+}
+
+function updateNotice(d) {
+    if (d.engineAvailable === false) {
+        showNotice('象棋引擎未就绪：棋子仍然可以自己走，「电脑走一步」用不了。请检查 engine 配置或 resources/engine 目录。');
+    } else if (d.persistenceAvailable === false) {
+        showNotice('数据库暂时连不上，这局只存在服务端内存里，重启服务会丢失。');
+    } else {
+        hideNotice();
+    }
+}
+function showNotice(text) {
+    const n = document.getElementById('notice');
+    n.textContent = text;
+    n.style.display = 'block';
+}
+function hideNotice() {
+    document.getElementById('notice').style.display = 'none';
+}
+
+function renderCoachState() {
+    document.getElementById('coachState').textContent =
+        state.coachAvailable ? '已就位' : '讲解不可用（仅引擎分析）';
+    document.getElementById('coachDot').className = 'dot' + (state.coachAvailable ? '' : ' off');
+}
+
+function renderMoves(moves) {
+    const ol = document.getElementById('moveList');
+    ol.innerHTML = '';
+    for (let i = 0; i < moves.length; i += 2) {
+        const li = document.createElement('li');
+        const no = document.createElement('span');
+        no.className = 'rn';
+        no.textContent = (Math.floor(i / 2) + 1) + '.';
+        li.appendChild(no);
+        [moves[i], moves[i + 1]].forEach(m => {
+            const span = document.createElement('span');
+            span.className = 'mv ' + (m && m.ai ? 'ai' : 'me');
+            span.textContent = m ? m.chinese : '';
+            li.appendChild(span);
+        });
+        ol.appendChild(li);
+    }
+    ol.scrollTop = ol.scrollHeight;
+}
+
+function renderFouls(fouls) {
+    const ul = document.getElementById('foulList');
+    ul.innerHTML = '';
+    fouls.slice(-12).forEach(f => {
+        const li = document.createElement('li');
+        li.textContent = typeof f === 'string' ? f : f.detail;
+        ul.appendChild(li);
+    });
+}
+
+/* ================= 对话窗口 ================= */
+/** 用服务端返回的记录整体重绘，避免本地与服务端两份状态对不上 */
+function renderChat(messages) {
+    const log = document.getElementById('chatLog');
+    log.innerHTML = '';
+    messages.forEach(m => {
+        const wrap = document.createElement('div');
+        wrap.className = 'msg ' + (m.role === 'user' ? 'user' : 'coach');
+        if (m.tag) {
+            const t = document.createElement('div');
+            t.className = 'tag';
+            t.textContent = m.tag;
+            wrap.appendChild(t);
+        }
+        const bubble = document.createElement('div');
+        bubble.className = 'bubble';
+        bubble.textContent = m.content;
+        wrap.appendChild(bubble);
+        log.appendChild(wrap);
+    });
+    log.scrollTop = log.scrollHeight;
+}
+
+function addMsg(role, text, tag) {
+    const log = document.getElementById('chatLog');
+    const wrap = document.createElement('div');
+    wrap.className = 'msg ' + role;
+    if (tag) {
+        const t = document.createElement('div');
+        t.className = 'tag';
+        t.textContent = tag;
+        wrap.appendChild(t);
+    }
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    bubble.textContent = text;
+    wrap.appendChild(bubble);
+    log.appendChild(wrap);
+    log.scrollTop = log.scrollHeight;
+    return wrap;
+}
+
+function addThinking(text) {
+    const wrap = addMsg('coach', text);
+    wrap.classList.add('thinking');
+    return wrap;
+}
+
+/* ================= 事件绑定 ================= */
+document.getElementById('btnEngine').addEventListener('click', engineMoveOnce);
+document.getElementById('btnUndo').addEventListener('click', undoMove);
+document.getElementById('btnNew').addEventListener('click', () => {
+    if (!busy) showStartPanel();
+});
+/** 只转视角，不换我执哪边 —— 换边请用旁边那个按钮 */
+document.getElementById('btnFlip').addEventListener('click', () => {
+    flipped = !flipped;
+    // 正在飞的棋子记的是旧朝向的坐标，转过视角就作废，免得残影飘在错的地方
+    XQ.clearEffects();
+    render();
+});
+document.getElementById('btnSwitch').addEventListener('click', switchSide);
+document.getElementById('btnSetup').addEventListener('click', () => {
+    if (!busy && !chatBusy) location.href = '/setup.html';
+});
+
+/* 落子音效开关：默认开着，选择记在本地 */
+const soundBtn = document.getElementById('btnSound');
+function syncSoundBtn() {
+    soundBtn.textContent = XQ.isSoundOn() ? '🔊 音效' : '🔇 静音';
+}
+soundBtn.addEventListener('click', () => {
+    XQ.setSound(!XQ.isSoundOn());
+    localStorage.setItem('hong-coach-sound', XQ.isSoundOn() ? 'on' : 'off');
+    syncSoundBtn();
+});
+XQ.setSound(localStorage.getItem('hong-coach-sound') !== 'off');
+syncSoundBtn();
+document.getElementById('btnGotoSetup').addEventListener('click', () => {
+    location.href = '/setup.html';
+});
+document.getElementById('btnRules').addEventListener('click', () => {
+    addMsg('coach',
+        '怎么用：在左边点棋盘上的棋子，蓝色圆点是可以走的位置，点它落子；'
+        + '有子可吃的地方会套一个红圈。'
+        + '轮到哪一方就能动哪一方的子，所以红黑两边你都可以自己走。\n'
+        + '走完之后棋盘上会留下刚才这一手的轨迹（虚线弧带箭头），'
+        + '刚才走的子拖一条残影飞过去，吃掉对方的子会把它打飞。'
+        + '右下角「音效」可以开关落子声。\n'
+        + '不想自己走的时候，点「电脑走一步」，它替现在该走的那一方出一手 —— '
+        + '轮到红方就替红方走，轮到黑方就替黑方走。电脑不会自己动手，走一步要点一次。\n'
+        + '你走了亏棋我会主动开口，也可以直接在右边问我问题，我知道现在棋盘上是什么局面。\n'
+        + '「换边」是改成我执另一方（棋盘翻过来，我也换个称呼）；'
+        + '「翻转视角」只是把棋盘转过来看，不影响谁执哪边。\n'
+        + '「自己摆棋」可以摆一个残局，指定轮到谁走、你执哪边，再开打。\n'
+        + '走错了就点「悔棋」退回去，次数不限，可以一直退到开局。'
+        + '电脑替你应过一手时，点一次会把它的应招和你上一步一起退掉 —— '
+        + '也就是直接回到你落子之前；连着点就能一路往前退。\n'
+        + '「新局」可以重新选边。对局会存在服务端，刷新页面还在。', '使用说明');
+});
+
+document.querySelectorAll('.sideBtn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        if (!busy) startGame(btn.dataset.side);
+    });
+});
+
+document.getElementById('btnSend').addEventListener('click', submitChat);
+document.getElementById('chatInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); submitChat(); }
+});
+document.querySelectorAll('.quick button').forEach(btn => {
+    btn.addEventListener('click', () => {
+        if (busy || chatBusy || !state.playerSide) return;
+        sendChat(btn.dataset.q);
+    });
+});
+
+function submitChat() {
+    const input = document.getElementById('chatInput');
+    const text = input.value.trim();
+    if (!text || busy || chatBusy) return;
+    if (!state.playerSide) { setStatus('先选边开一局，再问棋叔', 'warn'); return; }
+    input.value = '';
+    sendChat(text);
+}
+
+/* ================= 启动 ================= */
+render();          // 先把空棋盘画出来，别让用户对着白板等接口
+boot();
 </script>
 </body>
 </html>

@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>摆棋 · 棋叔 中国象棋 AI 陪练</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            margin: 0; padding: 20px;
+            font-family: system-ui, "Microsoft YaHei", sans-serif;
+            background: #f7f7f9; color: #2c2c2a;
+            display: flex; justify-content: center;
+        }
+        .app { display: flex; gap: 20px; width: 100%; max-width: 1080px; align-items: flex-start; }
+        .left { flex: 0 0 auto; display: flex; flex-direction: column; gap: 12px; }
+        .right { flex: 1 1 auto; min-width: 320px; display: flex; flex-direction: column; gap: 12px; }
+
+        .card { background: #fff; border: 1px solid #e6e6e3; border-radius: 12px; padding: 12px; }
+        h3 { margin: 0 0 8px; font-size: 13px; font-weight: 500; color: #5F5E5A; }
+        h3:not(:first-child) { margin-top: 16px; }
+
+        button {
+            padding: 7px 13px; border-radius: 9px; border: 1px solid #ddd;
+            background: #fff; cursor: pointer; font-size: 13px; color: #2c2c2a;
+        }
+        button:hover:not(:disabled) { box-shadow: 0 2px 10px rgba(0,0,0,.08); }
+        button:disabled { opacity: .5; cursor: not-allowed; }
+        button.primary { background: #185FA5; border-color: #185FA5; color: #fff; }
+        button.primary:disabled { background: #B5D4F4; border-color: #B5D4F4; }
+
+        .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        .linkBtn {
+            display: inline-block; padding: 7px 13px; border-radius: 9px; border: 1px solid #ddd;
+            background: #fff; color: #2c2c2a; text-decoration: none; font-size: 13px;
+        }
+        .linkBtn:hover { box-shadow: 0 2px 10px rgba(0,0,0,.08); }
+
+        /* 棋子托盘 */
+        .palette { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+        .pItem {
+            padding: 2px; height: 46px; display: flex; align-items: center; justify-content: center;
+            font-size: 15px; font-weight: 600; line-height: 1;
+        }
+        .pItem img { width: 38px; height: 38px; display: block; }
+        .pItem.on { border-color: #185FA5; box-shadow: 0 0 0 2px #B5D4F4 inset; background: #F0F7FE; }
+        .pItem.txt.red { color: #A32D2D; }
+        .pItem.txt.black { color: #3a3a37; }
+        #btnEraser { width: 100%; margin-top: 6px; height: 34px; }
+        #btnEraser.on { border-color: #185FA5; background: #F0F7FE; }
+
+        #board { border: 1px solid #dfe0dd; border-radius: 6px; background: #fefefe; cursor: crosshair; }
+
+        label.opt {
+            display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 9px;
+            border: 1px solid #e6e6e3; cursor: pointer; font-size: 13px; margin-bottom: 6px;
+        }
+        label.opt:hover { background: #fafaf8; }
+        label.opt input { margin: 0; }
+        label.opt.on { border-color: #B5D4F4; background: #F0F7FE; }
+
+        #fenBox {
+            width: 100%; padding: 8px 10px; border-radius: 9px; border: 1px solid #ddd;
+            font-size: 12px; font-family: ui-monospace, Consolas, monospace;
+        }
+        #fenBox:focus { outline: 2px solid #B5D4F4; border-color: #185FA5; }
+        .row { display: flex; gap: 8px; align-items: center; }
+        .row > input { flex: 1; }
+
+        #problems { font-size: 12.5px; line-height: 1.75; }
+        #problems .ok { color: #0C6B3D; }
+        #problems .bad { color: #A32D2D; font-weight: 600; margin-bottom: 4px; }
+        #problems li { color: #A32D2D; margin-bottom: 3px; }
+        #problems ul { margin: 0; padding-left: 18px; }
+
+        /* 落子前的那一句预判：鼠标停在哪儿、能不能放，就在棋盘下面说 */
+        #placeTip {
+            min-height: 1.7em; font-size: 12.5px; color: #5F5E5A;
+            padding: 6px 8px; border-radius: 8px; background: #fafaf8; border: 1px solid #eeeee9;
+        }
+        #placeTip.bad { color: #A32D2D; background: #FDF3F2; border-color: #F3D6D4; }
+
+        #flipHint { margin-top: 8px; font-size: 12.5px; color: #8A6D1F; }
+        #flipHint[hidden] { display: none; }
+        #flipHint button { margin-left: 8px; padding: 4px 10px; font-size: 12px; }
+
+        details.rules { margin-top: 10px; font-size: 12px; color: #5F5E5A; }
+        details.rules summary {
+            cursor: pointer; color: #185FA5; font-size: 12.5px; padding: 2px 0; outline: none;
+        }
+        details.rules ul { margin: 6px 0 0; padding-left: 18px; line-height: 1.85; }
+        details.rules b { color: #2c2c2a; font-weight: 600; }
+
+        .hint { font-size: 12px; color: #888780; line-height: 1.7; }
+    </style>
+</head>
+<body>
+<div class="app">
+    <section class="left">
+        <div class="card toolbar">
+            <button id="btnInitial">初始局面</button>
+            <button id="btnClear">清空</button>
+            <button id="btnFlip">翻转视角</button>
+            <a class="linkBtn" href="/play.html">返回对局</a>
+        </div>
+        <div class="card">
+            <h3>棋子（点一个，再点棋盘落下）</h3>
+            <div class="palette" id="palette"></div>
+            <button id="btnEraser">擦除</button>
+        </div>
+        <canvas id="board" width="450" height="500"></canvas>
+        <div class="hint" id="placeTip"></div>
+    </section>
+
+    <section class="right">
+        <div class="card">
+            <h3>轮到谁走</h3>
+            <label class="opt" id="optTurnRed"><input type="radio" name="turn" value="RED" checked/>红方先行</label>
+            <label class="opt" id="optTurnBlack"><input type="radio" name="turn" value="BLACK"/>黑方先行</label>
+
+            <h3>你执哪一方（只决定棋盘朝向和教练怎么称呼你）</h3>
+            <label class="opt" id="optSideRed"><input type="radio" name="side" value="RED" checked/>我执红</label>
+            <label class="opt" id="optSideBlack"><input type="radio" name="side" value="BLACK"/>我执黑</label>
+
+            <h3>局面文本（FEN）</h3>
+            <div class="row">
+                <input id="fenBox" placeholder="摆好后这里会自动生成，也可以粘贴一段再点「载入」"/>
+                <button id="btnLoadFen">载入</button>
+            </div>
+            <div class="hint" style="margin-top:6px">
+                写的时候从上往下按行来：<b>第 1 行是黑方底线，第 10 行是红方底线</b>（大写＝红，小写＝黑）。<br/>
+                这个顺序是固定的，跟你执红还是执黑、有没有点「翻转视角」都没关系。
+            </div>
+
+            <h3>检查结果</h3>
+            <div id="problems"></div>
+            <div id="flipHint" hidden></div>
+
+            <details class="rules">
+                <summary>摆棋要守的规矩（点开看）</summary>
+                <ul>
+                    <li><b>数量</b>：每方最多 车 2、马 2、炮 2、相/象 2、仕/士 2、帅/将 1、兵/卒 5；
+                        帅和将各一个都不能少。</li>
+                    <li><b>帅/将、仕/士</b>：只能待在自己这半边的九宫里 ——
+                        红方九宫是第 8~10 行第 4~6 列，黑方九宫是第 1~3 行第 4~6 列。
+                        把红帅摆到第 1~3 行同样「在九宫里」，但那是<b>黑方的</b>九宫，一样不成立。
+                        仕走斜线，所以只落在九宫的 5 个点上（四角加正中），其余点位摆不了。</li>
+                    <li><b>相/象</b>：不能过河，而且走田字，只能落在己方半场的
+                        7 个固定点上（红：第 10、6 行第 3、7 列，第 8 行第 1、5、9 列）。</li>
+                    <li><b>兵/卒</b>：只能向前，不能退回自己后方（红兵不在第 8~10 行，黑卒不在第 1~3 行）。</li>
+                    <li><b>局面</b>：两将不能照面，中间得有子挡着；轮到的一方不能已经无棋可走。</li>
+                    <li>车、马、炮没有位置限制，放哪都行。</li>
+                    <li>上面每一条都在<b>落子之前</b>就判：鼠标底下那一格会亮绿圈（放得下）或红圈（放不下），
+                        放不下的直接不进盘面。「两将照面」这类要看整盘的，得等摆完才判得出。</li>
+                </ul>
+            </details>
+
+            <div style="margin-top:16px">
+                <button id="btnStart" class="primary" style="width:100%;padding:11px" disabled>开始对局</button>
+            </div>
+            <div class="hint" style="margin-top:10px">
+                摆好后点「开始对局」进入对局页。开局后不自动走棋：轮到谁走就谁走，红黑两边你都能自己动。<br/>
+                想让电脑出一手，点对局页的「电脑走一步」—— 它替当时该走的那一方走。<br/>
+                不合法的地方会在上面列出来，改完就能开局。
+            </div>
+        </div>
+    </section>
+</div>
+
+<script src="/xq/xq-render.js"></script>
+<script>
+/* ================= 画布 ================= */
+const API = '/api/game';
+
+const cvs = document.getElementById('board');
+const ctx = cvs.getContext('2d');
+const DPR = window.devicePixelRatio || 1;
+cvs.style.width = XQ.W + 'px';
+cvs.style.height = XQ.H + 'px';
+cvs.width = Math.round(XQ.W * DPR);
+cvs.height = Math.round(XQ.H * DPR);
+
+const COLS = XQ.COLS, ROWS = XQ.ROWS, R_PIECE = XQ.R_PIECE;
+const GLYPH = XQ.GLYPH;
+
+/* ================= 状态 ================= */
+/** 标准开局，只用来填「初始局面」按钮；服务端还会再校验一遍 */
+const INITIAL_FEN = 'rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR';
+
+let grid = matrixFromFen(INITIAL_FEN);
+let picked = 'P';          // 当前画笔：棋子字母 / 'ERASE' / null
+let flipped = false;
+let turn = 'RED';
+let playerSide = 'RED';
+let lastCell = null;
+let problems = [];
+let badCells = [];         // 出错的格子，服务端标出来的，画成红圈
+let canStart = false;
+let checkTimer = null;
+
+/* 落子前的预判：鼠标停在哪一格、这一格放不放得下 */
+let hoverCell = null;      // 鼠标底下的交叉点
+let hoverVerdict = null;   // {r, c, ok, message} —— 上一次问服务端的结果
+let hoverSeq = 0;          // 请求序号，只认最后一次，避免旧回包盖掉新判断
+let hoverTimer = null;
+let gridVersion = 0;       // 盘面每改一次 +1，用来作废过期的预判
+let carried = null;        // {r, c, code} 从棋盘上拿起来的那一枚；托盘里拿的是 null
+
+/** "rnbakabnr/9/..." → 10×9 矩阵（纯字符串展开，不涉及任何棋规） */
+function matrixFromFen(fen) {
+    return fen.split(' ')[0].split('/').map(row => {
+        const cells = [];
+        for (const ch of row) {
+            if (ch >= '1' && ch <= '9') {
+                for (let i = 0; i < Number(ch); i++) cells.push(null);
+            } else {
+                cells.push(ch);
+            }
+        }
+        while (cells.length < COLS) cells.push(null);
+        return cells;
+    });
+}
+
+function emptyMatrix() {
+    return Array.from({length: ROWS}, () => Array(COLS).fill(null));
+}
+
+/* ================= 绘制 ================= */
+function paint(ts) {
+    const shake = XQ.shakeOffset(ts);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.clearRect(0, 0, XQ.W, XQ.H);
+    ctx.save();
+    ctx.translate(shake.x, shake.y);
+
+    XQ.paintBoardLayer(ctx);
+    if (lastCell) XQ.paintCellTint(ctx, lastCell.r, lastCell.c, flipped, 'rgba(186,117,23,.2)');
+
+    // 刚放下的那一格由落子动画接管，静态层先跳过，免得叠出两个子
+    const flying = XQ.flyingCells();
+    for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+            const code = grid[r][c];
+            if (!code || flying.has(r + ',' + c)) continue;
+            const pos = XQ.center(r, c, flipped);
+            XQ.drawPiece(ctx, pos.x, pos.y, R_PIECE, code);
+        }
+    }
+    // 校验不过的位置画红圈，摆错的地方一眼可见
+    XQ.paintProblemMarks(ctx, flipped, ts);
+    // 鼠标底下那一格的预判圈（绿＝放得下，红＝放不下）
+    XQ.paintHints(ctx, flipped, ts);
+    XQ.paintEffects(ctx, ts);
+    ctx.restore();
+}
+
+/** 只让界面重画一帧 */
+function render() { loop.invalidate(); }
+const loop = XQ.createLoop(paint);
+
+/* ================= 棋子托盘 ================= */
+function renderPalette() {
+    const box = document.getElementById('palette');
+    box.innerHTML = '';
+    [['R', 'N', 'B', 'A', 'K', 'C', 'P'], ['r', 'n', 'b', 'a', 'k', 'c', 'p']]
+        .forEach(row => row.forEach(code => box.appendChild(paletteItem(code))));
+    document.getElementById('btnEraser').classList.toggle('on', picked === 'ERASE');
+}
+
+function paletteItem(code) {
+    const btn = document.createElement('button');
+    btn.className = 'pItem' + (picked === code ? ' on' : '');
+    btn.title = GLYPH[code];
+    // 托盘里的棋子用同一套绘制代码现画一枚，跟落到棋盘上的长得完全一样
+    btn.appendChild(pieceThumb(code, 38));
+    btn.addEventListener('click', () => {
+        picked = code;
+        renderPalette();
+        resetHover();
+        // 换了画笔，悬停那一格的预判要按新棋子重判
+        if (hoverCell && isPieceCode(picked)) askPlace(hoverCell);
+        updateTip();
+        render();
+    });
+    return btn;
+}
+
+function pieceThumb(code, size) {
+    const dpr = window.devicePixelRatio || 1;
+    const cv = document.createElement('canvas');
+    cv.width = Math.round(size * dpr);
+    cv.height = Math.round(size * dpr);
+    cv.style.width = size + 'px';
+    cv.style.height = size + 'px';
+    const g = cv.getContext('2d');
+    const sp = XQ.pieceSprite(code, size * 0.42);
+    const w = sp.size * dpr;
+    g.drawImage(sp.canvas, (cv.width - w) / 2, (cv.height - w) / 2, w, w);
+    return cv;
+}
+
+/* ================= 交互 ================= */
+
+/* --------- 落子前的预判 --------- */
+
+function isPieceCode(code) { return !!code && code !== 'ERASE'; }
+
+function sameCell(a, b) { return !!a && !!b && a.r === b.r && a.c === b.c; }
+
+/** 盘面一改，之前那些预判就都作废了：结论说不上还对不对，连同在路上的一起丢掉 */
+function resetHover() {
+    hoverSeq++;
+    hoverVerdict = null;
+    XQ.setGhost(null);
+}
+
+/** 手里这一枚是不是从棋盘上拿起来的（换过画笔就当拿的是托盘里的了） */
+function carriedHere() {
+    return !!carried && carried.code === picked;
+}
+
+/**
+ * 交给服务端判定的盘面。
+ * <p>
+ * 从棋盘上拿起来的那一枚要先从原格拿开再试 —— 否则「把帅从这儿挪到那儿」会被
+ * 「红方有 2 个帅」挡住，明明只是挪个位置。原格先不真清空，是为了让盘面在任何
+ * 一刻都是完整的：整盘校验（比如"没有帅"）不会因为手里拿着子而误报。
+ */
+function matrixForPlace() {
+    if (!carriedHere()) return grid;
+    const copy = grid.map(row => row.slice());
+    copy[carried.r][carried.c] = null;
+    return copy;
+}
+
+/**
+ * 发一次落子预判请求。连不上返回 null —— 这时候不预判、也不拦人，
+ * 让整盘校验那条老路去兜底，总比因为网络抖动什么都不让摆好。
+ */
+async function requestPlacement(cell) {
+    try {
+        const d = await postJSON(`${API}/position/place`,
+            {matrix: matrixForPlace(), r: cell.r, c: cell.c, code: picked});
+        return {r: cell.r, c: cell.c, ok: !!d.ok, message: d.message || ''};
+    } catch (err) {
+        return null;
+    }
+}
+
+/**
+ * 悬停时的预判：这一枚子放在这一格，摆得下去吗？
+ * <p>
+ * 校验发生在<b>落子之前</b>：结论是"不行"，那一手就直接不进盘面，
+ * 而不是先摆上去、再在右边列一长串错让用户自己回头挪。
+ * 规则全在服务端（跟开局用的同一套），界面只负责把结论显示出来。
+ * <p>
+ * 只认最后一次请求的结果：鼠标扫得快时会有好几个请求在路上，
+ * 先发的后到会把新结论盖掉，所以用一个序号作废过期的回包。
+ */
+async function askPlace(cell) {
+    const seq = ++hoverSeq;
+    const version = gridVersion;
+    const verdict = await requestPlacement(cell);
+    if (verdict == null) return null;
+    if (seq !== hoverSeq || version !== gridVersion) return null;   // 已经过期了
+    hoverVerdict = verdict;
+    XQ.setGhost(cell, verdict.ok);
+    updateTip();
+    render();
+    return verdict;
+}
+
+cvs.addEventListener('mousemove', e => {
+    const cell = XQ.hit(e.clientX, e.clientY, cvs, flipped);
+    if (sameCell(cell, hoverCell)) return;
+    hoverCell = cell;
+    resetHover();
+    updateTip();
+    render();
+
+    clearTimeout(hoverTimer);
+    if (cell && isPieceCode(picked)) {
+        // 鼠标扫过棋盘会连打好几个格子，缓一下再问，只问停下来的那一格
+        hoverTimer = setTimeout(() => {
+            if (isPieceCode(picked) && sameCell(cell, hoverCell)) askPlace(cell);
+        }, 70);
+    }
+});
+
+cvs.addEventListener('mouseleave', () => {
+    hoverCell = null;
+    resetHover();
+    updateTip();
+    render();
+});
+
+cvs.addEventListener('click', async e => {
+    const cell = XQ.hit(e.clientX, e.clientY, cvs, flipped);
+    if (!cell) return;
+    if (picked === 'ERASE') { eraseAt(cell); return; }
+    if (!isPieceCode(picked)) {
+        // 手里没拿棋子时，点棋盘上的子就把它拿起来 —— 再点别处就是挪过去
+        const code = grid[cell.r][cell.c];
+        if (code) {
+            picked = code;
+            carried = {r: cell.r, c: cell.c, code: code};
+            lastCell = cell;                      // 拿起来的那一格给个底色，免得忘了子是从哪来的
+            renderPalette();
+            resetHover();
+            if (sameCell(cell, hoverCell)) askPlace(cell);   // 换了画笔，预判也得重来
+            updateTip();
+            render();
+        }
+        return;
+    }
+    await placeAt(cell);
+});
+
+/** 擦除：拿走一枚子只会让局面变简单，不必事先问 */
+function eraseAt(cell) {
+    if (carried && sameCell(carried, cell)) carried = null;   // 把正拿着的子擦掉了，就当不拿了
+    if (!grid[cell.r][cell.c]) return;
+    grid[cell.r][cell.c] = null;
+    gridVersion++;
+    resetHover();
+    lastCell = cell;
+    render();
+    scheduleCheck();
+}
+
+/**
+ * 落子。顺序要紧：<b>先问能不能放，再放</b>。
+ * 悬停时预判过的直接复用结论，没预判过（或没停够时间）的当场问一次；
+ * 问不到（断网）就先放行，让整盘校验去报。
+ */
+async function placeAt(cell) {
+    const verdict = sameCell(cell, hoverVerdict) ? hoverVerdict : await requestPlacement(cell);
+
+    if (verdict && !verdict.ok) {
+        // 放不下去：盘面一步都不动，只给一声"不行"和一句原因
+        hoverVerdict = verdict;
+        XQ.setGhost(cell, false);
+        XQ.refuse(cell);
+        updateTip();
+        render();
+        return;
+    }
+
+    // 从棋盘上拿起来的子：原格到这才算真的空出来，所以先把原格清掉再放
+    if (carriedHere() && !sameCell(carried, cell)) grid[carried.r][carried.c] = null;
+    carried = null;
+    grid[cell.r][cell.c] = picked;
+    gridVersion++;
+    resetHover();
+    XQ.dropIn({r: cell.r, c: cell.c, code: picked, flipped: flipped});   // 摆下去要"落"到位
+    XQ.sound('move');
+    lastCell = cell;
+    updateTip();
+    render();
+    scheduleCheck();
+}
+
+/* 右键直接擦掉一格，比重开托盘快 */
+cvs.addEventListener('contextmenu', e => {
+    e.preventDefault();
+    const cell = XQ.hit(e.clientX, e.clientY, cvs, flipped);
+    if (!cell) return;
+    eraseAt(cell);
+});
+
+/* --------- 棋盘下面那句话 --------- */
+
+/** 鼠标停在哪、能不能放、被拒的原因，都在这句里说清楚 */
+function updateTip() {
+    const box = document.getElementById('placeTip');
+    let text = '', bad = false;
+    if (isPieceCode(picked) && hoverCell) {
+        const at = '第 ' + (hoverCell.r + 1) + ' 行第 ' + (hoverCell.c + 1) + ' 列';
+        const name = GLYPH[picked];
+        if (sameCell(hoverCell, hoverVerdict) && hoverVerdict.ok) {
+            text = '✓ ' + name + ' 放在' + at + '：可以';
+        } else if (sameCell(hoverCell, hoverVerdict)) {
+            bad = true;
+            text = '✗ ' + name + ' 放在' + at + '：' + hoverVerdict.message;
+        } else {
+            text = name + ' → ' + at;
+        }
+    } else if (picked === 'ERASE') {
+        text = '擦除模式：点哪一格清哪一格（也可以直接右键）。';
+    } else if (isPieceCode(picked)) {
+        text = carriedHere()
+            ? '手里拿着 ' + GLYPH[picked] + '（从第 ' + (carried.r + 1) + ' 行第 ' + (carried.c + 1)
+              + ' 列拿起），放到新的交叉点上就挪过去了。'
+            : '手里拿着 ' + GLYPH[picked] + '，把它点到棋盘上的交叉点上。';
+    } else {
+        text = '点一枚棋子拿起它，再点棋盘上的交叉点放下；点棋盘上已有的棋子可以把它拿起来。';
+    }
+    box.textContent = text;
+    box.classList.toggle('bad', bad);
+}
+
+/* ================= 与服务端交互 ================= */
+async function postJSON(url, body) {
+    const res = await fetch(url, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body || {})
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return res.json();
+}
+
+/** 摆一格就发一次请求太浪费，攒一下再问 */
+function scheduleCheck() {
+    clearTimeout(checkTimer);
+    checkTimer = setTimeout(() => check({matrix: grid, turn: turn}), 220);
+}
+
+async function check(payload) {
+    try {
+        applyCheck(await postJSON(`${API}/position/check`, payload));
+    } catch (err) {
+        canStart = false;
+        badCells = [];
+        XQ.setProblemCells(badCells);
+        renderProblems([], '连不上服务：' + err.message);
+        document.getElementById('btnStart').disabled = true;
+        render();
+    }
+}
+
+function applyCheck(d) {
+    if (Array.isArray(d.matrix)) { grid = d.matrix; gridVersion++; }   // 服务端规范化后的盘面
+    if (d.turn) { turn = d.turn; syncRadios(); }
+    if (typeof d.fen === 'string') document.getElementById('fenBox').value = d.fen;
+    problems = d.problems || [];
+    badCells = Array.isArray(d.badCells) ? d.badCells : [];
+    XQ.setProblemCells(badCells);
+    canStart = !!d.ok;
+    renderProblems(problems, null);
+    document.getElementById('btnStart').disabled = !canStart;
+    render();
+    suggestFlipIfUpsideDown();
+    // 盘面换了，鼠标底下那一格的预判要重新判一次，不然圈还是旧结论
+    resetHover();
+    if (hoverCell && isPieceCode(picked)) askPlace(hoverCell); else updateTip();
+}
+
+/**
+ * 局面不合法时，顺手看一眼「上下颠倒过来是不是就合法了」。
+ * <p>
+ * 这一幕来自真实的困惑：有人按屏幕上看到的顺序从上往下写局面文本，
+ * 结果红帅写成了第 1 行（黑方底线）、黑将写成第 10 行，两条「不在九宫里」的提示看着莫名其妙。
+ * 碰到这种情况直接给一个翻正的按钮，别让人对着报错发呆。
+ */
+async function suggestFlipIfUpsideDown() {
+    const box = document.getElementById('flipHint');
+    box.innerHTML = '';
+    box.hidden = true;
+    if (canStart) return;
+    // 行序颠倒 = 盘面上下翻转：第 1 行搬到第 10 行，其余同理
+    const upsideDown = grid.slice().reverse();
+    let d;
+    try {
+        d = await postJSON(`${API}/position/check`, {matrix: upsideDown, turn: turn});
+    } catch (err) {
+        return;      // 连不上就算了，不影响正常摆棋
+    }
+    if (!d.ok) return;
+
+    box.hidden = false;
+    const text = document.createElement('span');
+    text.textContent = '这个局面看着像是上下写反了 —— 翻过来就是合法的。';
+    const btn = document.createElement('button');
+    btn.textContent = '翻正';
+    btn.addEventListener('click', () => {
+        grid = upsideDown.map(row => row.slice());
+        gridVersion++;
+        lastCell = null;
+        carried = null;
+        resetHover();
+        render();
+        check({matrix: grid, turn: turn});
+    });
+    box.appendChild(text);
+    box.appendChild(btn);
+}
+
+function renderProblems(list, fallback) {
+    const box = document.getElementById('problems');
+    box.innerHTML = '';
+    if (fallback) {
+        const p = document.createElement('div');
+        p.style.color = '#A32D2D';
+        p.textContent = fallback;
+        box.appendChild(p);
+        return;
+    }
+    if (!list.length) {
+        const p = document.createElement('div');
+        p.className = 'ok';
+        p.textContent = '✓ 这个局面可以下';
+        box.appendChild(p);
+        return;
+    }
+    const head = document.createElement('div');
+    head.className = 'bad';
+    head.textContent = '✗ 有 ' + list.length + ' 处要改（棋盘上红圈标出来了）';
+    box.appendChild(head);
+    const ul = document.createElement('ul');
+    list.forEach(text => {
+        const li = document.createElement('li');
+        li.textContent = text;
+        ul.appendChild(li);
+    });
+    box.appendChild(ul);
+}
+
+/* ================= 控件 ================= */
+function syncRadios() {
+    document.querySelectorAll('input[name="turn"]').forEach(input => {
+        input.checked = (input.value === turn);
+        input.closest('label').classList.toggle('on', input.checked);
+    });
+    document.querySelectorAll('input[name="side"]').forEach(input => {
+        input.checked = (input.value === playerSide);
+        input.closest('label').classList.toggle('on', input.checked);
+    });
+}
+
+document.querySelectorAll('input[name="turn"]').forEach(input => {
+    input.addEventListener('change', () => { turn = input.value; syncRadios(); scheduleCheck(); });
+});
+document.querySelectorAll('input[name="side"]').forEach(input => {
+    input.addEventListener('change', () => { playerSide = input.value; syncRadios(); });
+});
+
+document.getElementById('btnInitial').addEventListener('click', () => {
+    grid = matrixFromFen(INITIAL_FEN);
+    gridVersion++;
+    lastCell = null;
+    carried = null;
+    resetHover();
+    render();
+    check({matrix: grid, turn: turn});
+});
+
+document.getElementById('btnClear').addEventListener('click', () => {
+    grid = emptyMatrix();
+    gridVersion++;
+    lastCell = null;
+    carried = null;
+    resetHover();
+    render();
+    check({matrix: grid, turn: turn});
+});
+
+document.getElementById('btnFlip').addEventListener('click', () => {
+    flipped = !flipped;
+    render();
+});
+
+document.getElementById('btnEraser').addEventListener('click', () => {
+    picked = (picked === 'ERASE') ? null : 'ERASE';
+    resetHover();
+    renderPalette();
+    updateTip();
+    render();
+});
+
+document.getElementById('btnLoadFen').addEventListener('click', () => {
+    const text = document.getElementById('fenBox').value.trim();
+    if (!text) return;
+    // 只把 FEN 交上去，走子方也由它决定
+    check({fen: text});
+});
+
+document.getElementById('btnStart').addEventListener('click', async () => {
+    if (!canStart) return;
+    const btn = document.getElementById('btnStart');
+    btn.disabled = true;
+    btn.textContent = '正在开局…';
+    // 新对局用一个新的 id 覆盖掉当前这局（旧局仍在库里，只是这个标签页不再指向它）
+    const id = 'g' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+    sessionStorage.setItem('hong-coach-session', id);
+    try {
+        const d = await postJSON(`${API}/setup/${id}`, {playerSide, turn, matrix: grid});
+        if (d.result === 'setup') {
+            location.href = '/play.html';
+            return;
+        }
+        applyCheck(d);     // 服务端又挑出了问题
+    } catch (err) {
+        renderProblems([], '开局失败：' + err.message);
+        canStart = false;
+    } finally {
+        btn.textContent = '开始对局';
+        btn.disabled = !canStart;
+    }
+});
+
+/* ================= 启动 ================= */
+renderPalette();
+syncRadios();
+updateTip();
+render();
+check({matrix: grid, turn: turn});
+</script>
+</body>
+</html>

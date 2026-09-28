@@ -2,26 +2,16 @@ package com.hong.coach.game;
 
 import lombok.Data;
 
-import javax.validation.constraints.NotNull;
-
 /**
- * 用横纵坐标的方式 表达棋子的移动
- * 前端所使用的
+ * 前端提交的走子请求，用棋盘行列坐标表达。
+ * <p>
+ * 坐标约定与 {@link XqRules.Pos} 一致：r 是行（0 在最上方黑方底线，9 在最下方红方底线），
+ * c 是列（0~8，屏幕从左到右）。合法性由服务端校验，这里不做参数校验。
  */
 @Data
 public class PositionMove {
-    /**
-     * 列  row
-     */
-    @NotNull(message = "移动坐标 fromR 不能为空")
     private Integer fromR;
-    @NotNull(message = "移动坐标toR 不能为空")
-    private Integer toR;
-    /**
-     * 行 column
-     */
-    @NotNull(message = "移动坐标fromC不能为空")
     private Integer fromC;
-    @NotNull(message = "移动坐标toC不能为空")
+    private Integer toR;
     private Integer toC;
 }

@@ -97,6 +97,22 @@ public class XqRules {
     /* ===================== Piece Rules ===================== */
 
     /**
+     * 按类型创建棋子。用于复制盘面、从 FEN 还原局面等场景。
+     */
+    public static Piece create(PieceType type, Side side, Pos pos) {
+        switch (type) {
+            case ROOK: return new Rook(side, pos);
+            case HORSE: return new Horse(side, pos);
+            case ELEPHANT: return new Elephant(side, pos);
+            case ADVISOR: return new Advisor(side, pos);
+            case GENERAL: return new General(side, pos);
+            case CANNON: return new Cannon(side, pos);
+            case PAWN: return new Pawn(side, pos);
+            default: throw new IllegalArgumentException("未知棋子类型: " + type);
+        }
+    }
+
+    /**
      * Rook: 车
      */
     public static final class Rook extends Piece {
