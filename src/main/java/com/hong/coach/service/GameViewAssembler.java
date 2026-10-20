@@ -82,6 +82,9 @@ public class GameViewAssembler {
         resp.put("engineAvailable", engine.isAvailable());
         resp.put("engine", engine.statusText());
         resp.put("coachAvailable", coach.isAvailable());
+        // 当前生效的大模型厂商（deepseek / dashscope / none），换厂商时靠它确认有没有切过去
+        resp.put("coachProvider", coach.providerName());
+        resp.put("coach", coach.statusText());
         resp.put("persistence", store.persistenceStatus());
         resp.put("cachedSessions", store.cachedCount());
         return resp;

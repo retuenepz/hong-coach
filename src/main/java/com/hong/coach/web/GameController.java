@@ -3,11 +3,14 @@ package com.hong.coach.web;
 import com.hong.coach.game.PositionMove;
 import com.hong.coach.game.PositionSetup;
 import com.hong.coach.game.Side;
+import com.hong.coach.service.CoachStreamHandle;
 import com.hong.coach.service.GameService;
 import com.hong.coach.web.dto.ChatRequest;
 import com.hong.coach.web.dto.NewGameRequest;
 import com.hong.coach.web.dto.PositionSetupRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -17,6 +20,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import reactor.core.Disposable;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -40,6 +45,12 @@ public class GameController {
 
     /** 摆棋校验用的临时棋盘标识，只是个名字，不会建成对局 */
     private static final String POSITION_PREVIEW = "position-preview";
+
+    /**
+     * 流式连接的最长存活时间。要比服务端 {@code coach.stream-max-ms} 宽裕，
+     * 免得内容还在推、连接先被容器掐了。
+     */
+    private static final long SSE_TIMEOUT_MS = 240_000L;
 
     private final GameService gameService;
 
@@ -159,6 +170,113 @@ public class GameController {
             return resp;
         }
         return gameService.chat(id, question.trim());
+    }
+
+    // ==================== 流式讲解（页面走这三个） ====================
+    //
+    // 大模型是边想边吐字的，一次等全量往往要十几秒，用户会以为页面卡死。
+    // 这三个接口把内容分段推出来，前端逐字显示。
+    //
+    // 事件格式（标准 SSE）：
+    //   event: delta   data: {"text":"这一小段"}          —— 增量文本，可能来很多次
+    //   event: done    data: { …, "chat":[…] }            —— 结束，带上完整对话记录
+    //   event: error   data: {"message":"…"}              —— 出错
+
+    /** 开局致辞（流式） */
+    @PostMapping(value = "/greeting/{id}/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter greetingStream(@PathVariable String id, HttpServletResponse response) {
+        return streamTo(gameService.greetingStream(id), response);
+    }
+
+    /** 上一步亏棋的点评（流式）。走子接口返回 coachTriggered=true 时前端会主动来取 */
+    @PostMapping(value = "/coach/{id}/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter coachStream(@PathVariable String id, HttpServletResponse response) {
+        return streamTo(gameService.coachStream(id), response);
+    }
+
+    /** 向教练提问（流式） */
+    @PostMapping(value = "/chat/{id}/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter chatStream(@PathVariable String id,
+                                 @RequestBody(required = false) ChatRequest request,
+                                 HttpServletResponse response) {
+        String question = request == null ? null : request.getQuestion();
+        if (question == null || question.isBlank()) {
+            return doneOnly(Map.of("result", "empty_question", "message", "问题不能为空"), response);
+        }
+        return streamTo(gameService.chatStream(id, question.trim()), response);
+    }
+
+    /**
+     * 把服务端的增量流桥接成 SSE 推给浏览器。
+     * <p>
+     * 前端用 fetch + ReadableStream 读（POST 没法用 EventSource），所以这里按标准 SSE 写事件。
+     * 推完必须 complete，否则连接会一直挂着。
+     */
+    private SseEmitter streamTo(CoachStreamHandle handle, HttpServletResponse response) {
+        disableProxyBuffering(response);
+        SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MS);
+
+        // 收尾动作：把最终文本记进对话、落库，并把完整对话回给前端。
+        // 正常结束和出错中断都要走这一步 —— 中断时用户已经看到了半截回答，
+        // 那些字也得存下来，不然刷新页面就前后对不上了。
+        Runnable settle = () -> {
+            Map<String, Object> done;
+            try {
+                done = handle.finish().get();
+            } catch (Exception e) {
+                log.warn("流式讲解收尾失败：{}", e.toString());
+                done = Map.of("result", "error");
+            }
+            send(emitter, "done", done);
+            emitter.complete();
+        };
+
+        Disposable disposable = handle.deltas().subscribe(
+                text -> send(emitter, "delta", Map.of("text", text)),
+                error -> {
+                    log.warn("流式讲解中断，已生成的部分照常保存：{}", error.toString());
+                    settle.run();
+                },
+                settle);
+
+        // 客户端断开（翻页、点了新局）时要顺手取消上游订阅，别让大模型白跑
+        emitter.onCompletion(disposable::dispose);
+        emitter.onError(e -> disposable.dispose());
+        emitter.onTimeout(() -> {
+            disposable.dispose();
+            emitter.complete();
+        });
+        return emitter;
+    }
+
+    /** 不需要生成内容、只用 done 事件回一句话的流（比如问题为空） */
+    private static SseEmitter doneOnly(Map<String, Object> payload, HttpServletResponse response) {
+        disableProxyBuffering(response);
+        SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MS);
+        send(emitter, "done", payload);
+        emitter.complete();
+        return emitter;
+    }
+
+    private static void send(SseEmitter emitter, String event, Object data) {
+        try {
+            emitter.send(SseEmitter.event().name(event).data(data, MediaType.APPLICATION_JSON));
+        } catch (Exception e) {
+            // 客户端断开是常态，不是故障，让它自然结束
+            emitter.complete();
+        }
+    }
+
+    /**
+     * 告诉中间的反向代理「别攒着」。
+     * <p>
+     * nginx 默认开 {@code proxy_buffering}，会把上游的响应攒够一块再转发 —— 流式就白做了，
+     * 用户还是要等信息全部生成完才看到。这个响应头是 nginx 认可的关闭开关，
+     * 代理那份配置里也同步写了 {@code proxy_buffering off}。
+     */
+    private static void disableProxyBuffering(HttpServletResponse response) {
+        response.setHeader("X-Accel-Buffering", "no");
+        response.setHeader("Cache-Control", "no-cache");
     }
 
     /**

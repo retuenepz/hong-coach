@@ -1,5 +1,6 @@
 # Spring Boot 环境后处理器
-# DashScopeAutoConfigGuard：没配大模型 key 时自动关掉 DashScope 自动配置，
-# 避免它「key 非空」的断言在启动阶段炸掉整个应用。
+# LlmProviderGuard：决定哪一家大模型客户端生效（spring.ai.model.chat），
+# 并在选中的那家没配 key 时把大模型整体关掉 —— 既避免「两家各建一个 ChatModel bean」
+# 的冲突，也避免厂商客户端「key 非空」的断言在启动阶段炸掉整个应用。
 org.springframework.boot.env.EnvironmentPostProcessor=\
-com.hong.coach.config.DashScopeAutoConfigGuard
+com.hong.coach.config.LlmProviderGuard

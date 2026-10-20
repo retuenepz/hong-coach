@@ -201,6 +201,8 @@ let targets = [];        // 合法落点
 let flipped = false;     // 棋盘是否翻转（我执黑时黑方在下方）
 let busy = false;        // 走子/开局进行中
 let chatBusy = false;    // 提问进行中
+/** 正在跑的流式讲解条数。大于 0 时不要让状态刷新把正在逐字显示的气泡冲掉 */
+let streamingCount = 0;
 
 /** 本地已经演过动画的那一手，避免服务端回来再演一遍 */
 let localPlayed = null;
@@ -354,6 +356,140 @@ async function getJSON(url) {
     return res.json();
 }
 
+/* ================= 流式讲解 ================= */
+
+/**
+ * 流式 POST：服务端按 SSE 事件往回推，这里边收边交给回调。
+ * 不能用 EventSource —— 那个只支持 GET，而提问是要带请求体的。
+ * 返回服务端 done 事件的负载。
+ */
+async function streamPost(url, body, onDelta) {
+    const res = await fetch(url, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'Accept': 'text/event-stream'},
+        body: JSON.stringify(body || {})
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    if (!res.body) throw new Error('当前浏览器不支持流式响应');
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buf = '';
+    let done = null;
+
+    for (;;) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        buf += decoder.decode(chunk.value, {stream: true});
+
+        // SSE 以空行分隔事件；事件之间可能被网络切成任意大小的块，所以要按缓冲区攒
+        let sep;
+        while ((sep = /\r?\n\r?\n/.exec(buf)) !== null) {
+            const block = buf.slice(0, sep.index);
+            buf = buf.slice(sep.index + sep[0].length);
+            const evt = parseSseBlock(block);
+            if (!evt) continue;
+            if (evt.name === 'delta') onDelta(evt.data.text || '');
+            else if (evt.name === 'done') done = evt.data;
+            else if (evt.name === 'error') throw new Error(evt.data.message || '讲解出错');
+        }
+    }
+    return done;
+}
+
+/** 解析一个 SSE 事件块，data 是 JSON 就解析成对象，否则原样返回字符串 */
+function parseSseBlock(block) {
+    let name = 'message';
+    const data = [];
+    for (const line of block.split(/\r?\n/)) {
+        if (line.startsWith('event:')) name = line.slice(6).trim();
+        else if (line.startsWith('data:')) data.push(line.slice(5).replace(/^ /, ''));
+    }
+    if (!data.length) return null;
+    const raw = data.join('\n');
+    let parsed = raw;
+    try { parsed = JSON.parse(raw); } catch (e) { /* 不是 JSON 就按原字符串用 */ }
+    return {name, data: parsed};
+}
+
+/**
+ * 打字机：收到的文字先排进队列再慢慢吐出来。
+ * 模型一次可能给好几个字，直接贴上去会一跳一跳的；
+ * 队列积压得多时加快吐字速度，免得内容早就生成完了、屏幕上还在追。
+ */
+function startTyping(bubbleEl) {
+    let queue = '';
+    let shown = '';
+    let timer = null;
+
+    function tick() {
+        timer = null;
+        if (!queue) return;
+        const step = queue.length > 90 ? 8 : queue.length > 30 ? 4 : 1;
+        shown += queue.slice(0, step);
+        queue = queue.slice(step);
+        bubbleEl.textContent = shown;
+        scrollChat();
+        timer = setTimeout(tick, 18);
+    }
+
+    return {
+        push(text) {
+            if (!text) return;
+            queue += text;
+            if (!timer) timer = setTimeout(tick, 18);
+        },
+        /** 队列里剩下的立刻全部显示出来 */
+        settle() {
+            if (timer) { clearTimeout(timer); timer = null; }
+            shown += queue;
+            queue = '';
+            bubbleEl.textContent = shown;
+            return shown;
+        }
+    };
+}
+
+function scrollChat() {
+    const log = document.getElementById('chatLog');
+    log.scrollTop = log.scrollHeight;
+}
+
+/**
+ * 跑一条流式讲解，内容逐字填进一个新气泡。
+ * 服务端一句话都没说（比如「这步没什么好说的」）时，会把空气泡撤掉。
+ * @param tag 气泡上方的小标签，可选
+ * @returns 服务端 done 事件的负载
+ */
+async function runStream(url, body, tag) {
+    const wrap = addMsg('coach', '棋叔正在想…', tag);
+    wrap.classList.add('thinking');
+    const bubble = wrap.querySelector('.bubble');
+    const typing = startTyping(bubble);
+    let anyText = false;
+
+    try {
+        const done = await streamPost(url, body, text => {
+            if (!anyText) {
+                anyText = true;
+                wrap.classList.remove('thinking');
+            }
+            typing.push(text);
+        });
+        const typed = typing.settle();
+        if (anyText && typed) {
+            wrap.classList.remove('thinking');
+        } else {
+            wrap.remove();
+        }
+        return done;
+    } catch (err) {
+        typing.settle();
+        wrap.remove();
+        throw err;
+    }
+}
+
 /* ================= 开局 ================= */
 function showStartPanel(hint) {
     document.getElementById('startHint').textContent = hint || '';
@@ -377,6 +513,7 @@ async function startGame(side) {
         if (!d.engineAvailable) {
             showNotice('象棋引擎未就绪：棋子仍然可以自己走，「电脑走一步」用不了。请检查 engine 配置或 resources/engine 目录。');
         }
+        fetchGreeting();
     } catch (err) {
         setStatus('开局失败：' + err.message, 'bad');
         showStartPanel('连不上服务，请确认应用已启动');
@@ -415,12 +552,41 @@ async function boot() {
         const d = await getJSON(`${API}/state/${sessionId}`);
         if (d.result === 'state') {
             applyState(d);
+            // 从摆棋页跳回来、或者刚开局就刷新时，开场白可能还没生成，这里补上
+            if (needsGreeting(d)) fetchGreeting();
             return;
         }
     } catch (err) {
         /* 拿不到状态就当作新对局处理 */
     }
     showStartPanel();
+}
+
+/**
+ * 这局还缺开场白吗：一步都还没走，对话里也没有「开局」那条。
+ * 新开局、刷新页面、从摆棋页跳回来都会走到这里。
+ */
+function needsGreeting(d) {
+    if (!d || d.gameOver) return false;
+    if ((d.moves || []).length > 0) return false;
+    return !(d.chat || []).some(m => m.tag === '开局');
+}
+
+/**
+ * 开场白（流式）。故意不 await —— 开局按钮不该为了等一句话而卡住，
+ * 棋盘先摆出来，致辞在右边慢慢生成。
+ * 服务端那边是幂等的，重复请求也只会留下一条开场白。
+ */
+async function fetchGreeting() {
+    streamingCount++;
+    try {
+        const done = await runStream(`${API}/greeting/${sessionId}/stream`, {}, '开局');
+        if (done && Array.isArray(done.chat)) renderChat(done.chat);
+    } catch (err) {
+        /* 开场白拿不到不影响下棋，不必打扰用户 */
+    } finally {
+        streamingCount--;
+    }
 }
 
 /** 一手的身份：起终点一样就算同一手，用来判断动画有没有演过 */
@@ -543,42 +709,48 @@ async function undoMove() {
     }
 }
 
+/**
+ * 取上一步亏棋的点评（流式）。走子接口返回 coachTriggered=true 时才会来取。
+ * 走子本身早就完成了、盘面也已经刷新，这里只是等解说的文字一个字一个字出来。
+ */
 async function fetchCoachComment() {
-    const placeholder = addThinking('棋叔正在复盘这一步…');
+    streamingCount++;
     try {
-        const d = await postJSON(`${API}/coach/${sessionId}`, {});
-        if (Array.isArray(d.chat)) {
-            renderChat(d.chat);          // 服务端是对话记录的唯一来源
-        } else {
-            placeholder.remove();
-            if (d.comment) addMsg('coach', d.comment, '点评');
-        }
+        const done = await runStream(`${API}/coach/${sessionId}/stream`, {}, '点评');
+        if (!done) return;
+        if (done.result === 'nothing_to_say') return;
+        if (Array.isArray(done.chat)) renderChat(done.chat);
     } catch (err) {
-        placeholder.remove();
         addMsg('coach', '复盘失败：' + err.message, '提示');
+    } finally {
+        streamingCount--;
     }
 }
 
+/**
+ * 向教练提问（流式）。问题立刻显示在对话里，回答边生成边往外冒。
+ */
 async function sendChat(question) {
     addMsg('user', question);
-    addThinking('棋叔正在看棋盘…');
     chatBusy = true;
+    streamingCount++;
+    renderEngineButton();
+    renderUndoButton();
     try {
-        const d = await postJSON(`${API}/chat/${sessionId}`, {question});
-        if (d.result === 'no_session') {
+        const done = await runStream(`${API}/chat/${sessionId}/stream`, {question});
+        if (done && done.result === 'no_session') {
             showNotice('这局已经过期，请重新选边开局。');
             showStartPanel();
             return;
         }
-        if (Array.isArray(d.chat)) {
-            renderChat(d.chat);
-        } else {
-            addMsg('coach', d.answer || '我一时没想好，你再问我一次。');
-        }
+        if (done && Array.isArray(done.chat)) renderChat(done.chat);
     } catch (err) {
-        addMsg('coach', '回答失败：' + err.message);
+        addMsg('coach', '回答失败：' + err.message, '提示');
     } finally {
+        streamingCount--;
         chatBusy = false;
+        renderEngineButton();
+        renderUndoButton();
     }
 }
 
@@ -621,7 +793,9 @@ function applyState(d) {
 
     renderMoves(d.moves || []);
     renderFouls(d.fouls || []);
-    if (Array.isArray(d.chat)) renderChat(d.chat);
+    // 有讲解正在逐字往外冒时先别重绘：整体重绘会把那个气泡抹掉。
+    // 流结束时服务端会把完整对话回给前端，那时候再以它为准重绘一次。
+    if (Array.isArray(d.chat) && streamingCount === 0) renderChat(d.chat);
     renderCoachState();
     renderEngineButton();
     renderUndoButton();
@@ -769,12 +943,6 @@ function addMsg(role, text, tag) {
     wrap.appendChild(bubble);
     log.appendChild(wrap);
     log.scrollTop = log.scrollHeight;
-    return wrap;
-}
-
-function addThinking(text) {
-    const wrap = addMsg('coach', text);
-    wrap.classList.add('thinking');
     return wrap;
 }
 

@@ -2,6 +2,7 @@ package com.hong.coach.service;
 
 import com.hong.coach.coach.CoachProperties;
 import com.hong.coach.coach.CoachService;
+import com.hong.coach.coach.CoachStream;
 import com.hong.coach.coach.TeachContext;
 import com.hong.coach.engine.EngineAnalysis;
 import com.hong.coach.game.Board;
@@ -17,6 +18,7 @@ import com.hong.coach.repository.entity.ChessChatMessage;
 import com.hong.coach.repository.entity.ChessMove;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.Flux;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -73,11 +75,12 @@ public class GameService {
      * 开新局。
      * <p>
      * 谁都不自动走棋：执黑开局时棋盘上仍然轮到红方，等用户点棋子走、或者点「电脑走一步」。
+     * <p>
+     * 开场白<b>不在这里生成</b>：那是一句要问大模型的话，同步等它会让「开新局」按钮卡上十几秒。
+     * 响应照常秒回，前端随后用 {@link #greetingStream} 把开场白一边生成一边显示出来。
      */
     public Map<String, Object> newGame(String id, Side playerSide) {
         GameSession session = store.create(id, playerSide);
-
-        session.addMessage(ChessChatMessage.coach(coach.greeting(buildContext(session)), "开局"));
         session.touch();
         store.persist(session);
 
@@ -179,6 +182,8 @@ public class GameService {
      * 和「选边开新局」的区别只在于棋盘从哪儿来：这里直接把校验过的盘面交给会话，
      * 并记下它作为 {@code initialFen}，读档时才摆得回来。开局后不自动走棋 ——
      * 局面轮到哪一方，就由用户自己走或点「电脑走一步」。
+     * <p>
+     * 开场白同样交给 {@link #greetingStream} 流式生成，见 {@link #newGame}。
      */
     public Map<String, Object> startFromPosition(String id, Side playerSide, PositionSetup.Built built) {
         if (!built.ok()) {
@@ -188,7 +193,6 @@ public class GameService {
         }
 
         GameSession session = store.create(id, built.board(), playerSide);
-        session.addMessage(ChessChatMessage.coach(coach.greeting(buildContext(session)), "开局"));
         session.touch();
         store.persist(session);
 
@@ -431,6 +435,153 @@ public class GameService {
     }
 
     // ==================== AI 教练 ====================
+
+    /**
+     * 开局致辞（流式）。页面实际走这条 —— 开场白由大模型现编，
+     * 若在开局响应里同步等它，「开新局」按钮就会卡住不动。
+     * <p>
+     * 幂等：已经有开场白（标签是「开局」的那条）就不再生成，重复调用只会把现有对话回给前端。
+     */
+    public CoachStreamHandle greetingStream(String id) {
+        GameSession session = store.get(id);
+        if (session == null) return CoachStreamHandle.noSession();
+
+        CoachStream stream;
+        synchronized (session) {
+            if (hasGreeting(session)) {
+                return new CoachStreamHandle(Flux.empty(), () -> chatOnly(session));
+            }
+            stream = coach.streamGreeting(buildContext(session));
+        }
+
+        return new CoachStreamHandle(stream.deltas(), () -> {
+            GameSession latest = store.get(id);
+            if (latest == null) return chatOnly(null);
+            synchronized (latest) {
+                // 生成期间可能已经有人补齐了开场白（并发重复请求），再确认一次
+                if (!hasGreeting(latest) && !stream.text().isBlank()) {
+                    latest.addMessage(ChessChatMessage.coach(stream.text(), "开局"));
+                }
+                latest.touch();
+                store.persist(latest);
+                Map<String, Object> payload = chatOnly(latest);
+                payload.put("result", "greeting");
+                return payload;
+            }
+        });
+    }
+
+    /**
+     * 上一步亏棋的点评（流式）。
+     */
+    public CoachStreamHandle coachStream(String id) {
+        GameSession session = store.get(id);
+        if (session == null) return CoachStreamHandle.noSession();
+
+        MoveReview review;
+        CoachStream stream;
+        synchronized (session) {
+            review = session.getLastReview();
+            if (review == null || review.quality() == null) {
+                return new CoachStreamHandle(Flux.empty(), () -> {
+                    Map<String, Object> payload = chatOnly(session);
+                    payload.put("result", "nothing_to_say");
+                    return payload;
+                });
+            }
+            stream = coach.streamExplain(explainContext(session, review));
+        }
+
+        return new CoachStreamHandle(stream.deltas(), () -> {
+            GameSession latest = store.get(id);
+            if (latest == null) return chatOnly(null);
+            synchronized (latest) {
+                String comment = stream.text();
+                if (!comment.isBlank()) {
+                    // 降级来的本地提示标「提示」，真讲解标「等级 · 建议 xx」，
+                    // 前端据此一眼看出这段是不是大模型说的
+                    latest.addMessage(ChessChatMessage.coach(
+                            comment, stream.isDegraded() ? "提示" : tagOf(review)));
+                }
+                latest.touch();
+                store.persist(latest);
+
+                Map<String, Object> payload = chatOnly(latest);
+                payload.put("result", "coach");
+                payload.put("comment", comment);
+                payload.put("playedMove", review.playedChinese());
+                payload.put("betterMove", review.betterChinese());
+                payload.put("quality", review.quality());
+                payload.put("evalLoss", review.evalLoss());
+                return payload;
+            }
+        });
+    }
+
+    /**
+     * 用户提问（流式）。
+     * <p>
+     * 提问本身先落库，这样即使用户在等回答时刷了页面，问题也不会丢。
+     */
+    public CoachStreamHandle chatStream(String id, String question) {
+        GameSession session = store.get(id);
+        if (session == null) return CoachStreamHandle.noSession();
+
+        TeachContext ctx;
+        synchronized (session) {
+            session.addMessage(ChessChatMessage.user(question));
+
+            EngineAnalysis analysis = analysisForPosition(session);
+            ctx = buildContext(session);
+            ctx.setCurrentEvalCp(analysis == null ? 0 : analysis.evalCpFor(session.getPlayerSide()));
+            ctx.setPlayerInCheck(session.getBoard().inCheck(session.getPlayerSide()));
+            if (analysis != null) {
+                fillSuggestedMove(ctx, session.getBoard(), analysis);
+            }
+            session.touch();
+            store.persist(session);
+        }
+
+        CoachStream stream = coach.streamAnswer(question, ctx);
+        return new CoachStreamHandle(stream.deltas(), () -> {
+            GameSession latest = store.get(id);
+            if (latest == null) return chatOnly(null);
+            synchronized (latest) {
+                String answer = stream.text();
+                if (!answer.isBlank()) {
+                    latest.addMessage(ChessChatMessage.coach(answer, stream.isDegraded() ? "提示" : null));
+                }
+                latest.touch();
+                store.persist(latest);
+
+                Map<String, Object> payload = chatOnly(latest);
+                payload.put("result", "chat");
+                payload.put("answer", answer);
+                payload.put("currentEval", ctx.getCurrentEvalCp());
+                payload.put("suggestedMove", ctx.getSuggestedMove());
+                payload.put("engineAvailable", engine.isAvailable());
+                payload.put("coachAvailable", coach.isAvailable());
+                return payload;
+            }
+        });
+    }
+
+    /** 会话里是否已经有开场白 */
+    private static boolean hasGreeting(GameSession session) {
+        return session.getMessages().stream().anyMatch(m -> "开局".equals(m.getTag()));
+    }
+
+    /** 流式收尾时统一给前端的对话记录；会话没了就给空表，前端看到 no_session 会重新开局 */
+    private static Map<String, Object> chatOnly(GameSession session) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        if (session == null) {
+            payload.put("result", "no_session");
+            payload.put("chat", List.of());
+            return payload;
+        }
+        payload.put("chat", session.getMessages());
+        return payload;
+    }
 
     /**
      * 取「上一步亏棋」的教练点评。

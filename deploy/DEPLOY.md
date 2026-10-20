@@ -156,9 +156,41 @@ DB_PASSWORD=改成你的应用密码
 DB_ROOT_PASSWORD=改成你的 root 密码
 ```
 
-顺便看一眼 `APP_PORT`（默认 8080）和 `DASHSCOPE_API_KEY`。
-**DashScope key 留空也完全能跑** —— 应用会自动关掉 DashScope 的自动配置（一个请求都不会发），
+顺便看一眼 `APP_PORT`（默认 8080）、`COACH_PROVIDER`（默认 `deepseek`）和对应的那个大模型 key。
+**大模型 key 留空也完全能跑** —— 应用会把大模型整体关掉（一个请求都不会发），
 AI 教练改用本地规则提示，下棋、引擎复盘、悔棋、摆棋全都不受影响。填了 key 才是真人陪练口吻的讲解。
+
+`COACH_PROVIDER` 三选一，想换厂商只改这一行：
+
+| 值 | 用哪家的 key | 说明 |
+| --- | --- | --- |
+| `deepseek` | `DEEPSEEK_API_KEY` | 默认。可再用 `DEEPSEEK_MODEL` 选 `deepseek-flash`（默认，便宜快）或 `deepseek-v4-pro`（更强） |
+| `dashscope` | `DASHSCOPE_API_KEY` | 阿里云百炼 |
+| `none` | —— | 明确不要大模型，只走本地提示 |
+
+**注意别把 key 填错家**：选 `deepseek` 却只填了 `DASHSCOPE_API_KEY`，等于没配 key，教练会静默降级。
+改完可以用 `curl -s localhost:8080/api/game/status` 看 `coachProvider` 和 `coachAvailable` 确认。
+
+**思考量：默认已经关掉，别去开它**（`COACH_REASONING_EFFORT`，默认 `none`）
+
+DeepSeek 现在提供的两个模型都是**推理模型**：它会先把棋局在脑子里推演一遍，才开始说正文。
+可我们这个场景里棋是引擎算的，模型只负责把结论翻译成人话，这一遍推演纯属白等 ——
+实测同一个提问，不关思考要 **8.3 秒**才蹦出第一个字，关掉后 **1.3 秒**（开局致辞 0.6 秒）。
+`none` 就是关掉它，这是「首字快慢」上最大的一根杠杆。
+想让它重新推演（点评的细节会多一些），设成 `low` / `high` / `max`，代价是首字重新变慢。
+
+大模型超时也有几个可调的变量，一般不用动：
+
+| 变量 | 默认 | 管什么 |
+| --- | --- | --- |
+| `COACH_FIRST_BYTE_TIMEOUT_MS` | 30000 | 发给 DeepSeek 的请求「到响应头为止」的超时，含 TLS 握手与服务端排队 |
+| `COACH_TIMEOUT_MS` | 40000 | 应用层面「两段输出之间最多停顿多久」，超了就用本地提示 |
+| `COACH_STREAM_MAX_MS` | 180000 | 一整条流的最长时长 |
+| `COACH_HTTP_READ_TIMEOUT_MS` | 120000 | 走 Spring AI 那条路（百炼）的读超时 |
+| `COACH_HTTP_CONNECT_TIMEOUT_MS` | 10000 | 同上，连接超时 |
+
+**这几个超时都别往小改** —— 小过模型的首字延迟，每次调用都会被误判成失败
+（原因见下面「日志里报 SocketTimeoutException」）。
 
 ### 第 2 步：下载 Linux 版引擎
 
@@ -258,6 +290,10 @@ DB_PORT=3306
 DB_NAME=chess_coach_db
 DB_USER=chess
 DB_PASSWORD=你的密码
+COACH_PROVIDER=deepseek
+DEEPSEEK_API_KEY=
+DEEPSEEK_MODEL=deepseek-flash
+COACH_REASONING_EFFORT=none
 DASHSCOPE_API_KEY=
 ENGINE_PATH=/opt/hong-coach/engine
 ENGINE_EXE=Pikafish-Linux-x86-64-universal
@@ -314,16 +350,28 @@ server {
     listen 80;
     server_name chess.example.com;
 
-    # 全站静态页 + JSON 接口，没有 WebSocket，普通反代即可
+    # 静态页 + JSON 接口 + AI 教练的流式讲解
     location / {
         proxy_pass http://127.0.0.1:8080;
         proxy_set_header Host              $host;
         proxy_set_header X-Real-IP         $remote_addr;
         proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+
+        # ↓↓↓ 这三行别删 ↓↓↓
+        # 教练的讲解是一个字一个字推过来的（Server-Sent Events）。nginx 默认开着
+        # proxy_buffering，会把上游的响应攒够一块再转发 —— 那样「逐字往外跳」就被吞掉了，
+        # 用户还是要等整段生成完才看到第一句话，跟没改一样。
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 300s;      # 一条流可能持续一两分钟，别被默认的 60s 掐断
     }
 }
 ```
+
+应用自己也会在流式响应上带一个 `X-Accel-Buffering: no` 头（nginx 认得它），
+上面几行是双保险 —— 换个反代软件（Caddy 默认就不缓冲，Apache 要看 `mod_proxy` 配置）时
+记得确认同样的事。
 
 （`application-prod.yml` 里已经开了 `server.forward-headers-strategy: framework`，
 所以反代后的真实访客 IP 能正确记进日志。）
@@ -463,13 +511,74 @@ docker compose ps                    # mysql 是不是 healthy
 docker compose exec mysql mysql -uroot -p -e 'SHOW DATABASES;'
 ```
 
-**没填 DashScope key，教练还会说话吗**
+**大模型日志里报 `SocketTimeoutException`，教练老是退回本地提示**
+
+请求其实发出去了、响应头也回来了，只是**读 body 时超时**，看着像网络不通。多半是超时值
+被压到了 10 秒：Spring Boot 3.2 建 `RestClient` 时用的是各 HTTP 客户端自带的默认值，而
+classpath 上有 OkHttp（百炼 SDK 带进来的传递依赖）时它会被探测选中，OkHttp 默认读超时正好
+10 秒，大模型的首字延迟却经常超过 10 秒。项目里 `config/LlmHttpClientConfig` 已经换掉这个
+客户端并显式设了超时（默认 120 秒）。如果还报同样的错，按顺序查：
+
+1. `.env` 里的 `COACH_HTTP_READ_TIMEOUT_MS` 是不是被改小了（它必须大于模型的首字延迟）；
+2. 模型太慢：把 `COACH_TIMEOUT_MS`（应用层面等多久，默认 40 秒）一并调大，
+   或先换成 `DEEPSEEK_MODEL=deepseek-flash`；
+3. 服务器出网是否正常：`curl -sv https://api.deepseek.com 2>&1 | head`；
+   走了代理的话，别忘了给容器也配上 `HTTP_PROXY` / `HTTPS_PROXY`。
+
+**讲解不是逐字蹦出来的，要等好几秒才整段冒出来**
+
+说明中间有东西在攒响应。按顺序查：
+
+1. **反向代理没关缓冲** —— 最常见。nginx 默认 `proxy_buffering on`，会把上游的流攒够一块再转发，
+   应用自带的 `X-Accel-Buffering: no` 响应头救不了显式配了缓冲的写法。
+   见上面「挂域名 + HTTPS」那段的 `proxy_buffering off;`；
+2. 还有没有别的中间层：公司网关、云厂商的负载均衡、CDN，都可能缓冲，挨个确认；
+3. 用 curl 对照一下（`-N` 关掉 curl 自己的缓冲，应当一个字一个字往外冒）：
+
+   ```bash
+   curl -sN -X POST localhost:8080/api/game/chat/你的会话id/stream \
+        -H 'Content-Type: application/json' -d '{"question":"我该怎么走？"}'
+   ```
+
+   如果这条命令是逐字的、网页不是，那问题一定在浏览器和容器之间的某一层。
+
+**没填大模型 key，教练还会说话吗**
 
 会，但换成本地的规则提示，比如「这步有点亏，更值得考虑的是『炮二平五』」——
 内容来自引擎评分，只是没有大模型的自然语言润色。日志里不会出现任何大模型报错，
-因为 key 为空时应用会在启动阶段就把 DashScope 整体关掉（`DashScopeAutoConfigGuard`），
-连客户端 bean 都不创建。想开：在 `.env` 里填上 `DASHSCOPE_API_KEY` 再
-`docker compose up -d` 重启即可。
+因为 key 为空时应用压根不会创建客户端（见 `config/CoachLlmConfig`），一个请求都不会发。
+想开：在 `.env` 里填上**当前 `COACH_PROVIDER` 对应的那个** key
+（默认是 `DEEPSEEK_API_KEY`）再 `docker compose up -d` 重启即可。
+
+**怎么确认现在用的是哪家模型**
+
+```bash
+curl -s localhost:8080/api/game/status
+```
+
+`coachProvider` 是实际生效的厂商，`coachAvailable` 表示教练能不能说话，`coach` 是一句可读状态。几个常见结果：
+
+| 返回 | 含义 |
+| --- | --- |
+| `coachProvider: "deepseek"` + `coachAvailable: true` | 正常在用 DeepSeek |
+| `coachProvider: "deepseek"` + `coachAvailable: false` | 选的是 DeepSeek，但没配 key（或 `COACH_ENABLED=false`），教练走本地提示 |
+| `coachProvider: "dashscope"` | 当前切到了百炼 |
+| `coachProvider: "none"` | `COACH_PROVIDER` 写成了不认识的值 |
+
+**为什么教练要等好几秒才出字**（老版本的症状）
+
+分两种，先看是哪一种：
+
+1. **第一个字就要等 4~8 秒**，出来之后哗哗地往外蹦 —— 这是模型的「思考时间」。
+   DeepSeek 的模型默认会先把棋推演一遍才开口，而正文在思考结束前一个字都不吐。
+   本项目已默认把思考关掉（`COACH_REASONING_EFFORT=none`），正常情况下第一个字在 1 秒上下。
+   如果又变慢了，先确认这个变量没被改过。
+2. **整段话要等好几秒之后一次性冒出来** —— 那是中间有东西在攒响应，见下一条。
+
+**能不能两个 key 都填**
+
+可以，但同一时刻只有一个生效，由 `COACH_PROVIDER` 决定。别指望它「谁便宜用谁」——
+没有自动故障转移，DeepSeek 挂了不会自动切百炼。
 
 **同时下棋的人多了会排队**
 

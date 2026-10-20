@@ -22,6 +22,8 @@ spring:
       minimum-idle: 1
   ai:
     dashscope:
+      # 只有 COACH_PROVIDER=dashscope 时才用得上。
+      # 其余情况 config/LlmProviderGuard 会把百炼整套自动配置关掉（key 为空会炸启动）。
       api-key: ${DASHSCOPE_API_KEY:}
 
 server:
@@ -41,8 +43,17 @@ engine:
 
 coach:
   enabled: ${COACH_ENABLED:true}
+  # 用哪一家的模型：deepseek（自己发请求）| dashscope（走 Spring AI）| none（只出本地提示）
+  provider: ${COACH_PROVIDER:deepseek}
   trigger-threshold: ${COACH_TRIGGER_THRESHOLD:80}
   timeout-ms: ${COACH_TIMEOUT_MS:40000}
+  deepseek:
+    api-key: ${DEEPSEEK_API_KEY:}
+    base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
+    model: ${DEEPSEEK_MODEL:deepseek-flash}
+    # 思考量。none = 不思考，正文立刻开始吐（首字从 4~8 秒降到 0.5 秒级）。
+    # 引擎已经把棋算完了，模型只做翻译，不需要自己再推演一遍。
+    reasoning-effort: ${COACH_REASONING_EFFORT:none}
 
 logging:
   file:

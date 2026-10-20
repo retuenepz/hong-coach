@@ -22,6 +22,9 @@
         <java.version>17</java.version>
         <jackson.version>2.15.3</jackson.version>
         <spring.ai.alibaba.version>1.1.2.0</spring.ai.alibaba.version>
+        <!-- 必须和 spring-ai-alibaba 1.1.2.0 传递进来的 spring-ai 核心版本一致，
+             否则 deepseek 客户端会和 model/commons 出现版本错配 -->
+        <spring.ai.version>1.1.2</spring.ai.version>
     </properties>
 
     <dependencies>
@@ -50,6 +53,22 @@
             <artifactId>spring-ai-alibaba-starter-dashscope</artifactId>
             <version>${spring.ai.alibaba.version}</version>
         </dependency>
+
+        <!--
+          DeepSeek 开放平台（https://api.deepseek.com）【刻意不用 spring-ai-starter-model-deepseek】
+
+          DeepSeek 现在的两个模型都是推理模型，正文要等思考完才开始吐，教练场景首字要等 4~8 秒。
+          关掉思考只有一条路：往请求体里塞 reasoning_effort: "none"。
+          而那个 starter 的 ChatCompletionRequest 是固定字段的 record，DeepSeekChatOptions
+          也没有 extraBody 之类的口子 —— 参数根本传不下去，只能连封装一起换掉。
+
+          所以 DeepSeek 改成本项目自己发请求（coach/DeepSeekLlmClient，JDK HttpClient + SSE），
+          请求体自己组，加参数就是改一个 Map。Spring AI 只留给百炼那条回退路径
+          （coach/SpringAiLlmClient），选谁由 coach.provider 决定（见 config/CoachLlmConfig）。
+
+          注意 spring-ai-deepseek 的 jar 若留在 classpath，它的 chat 自动配置仍可能建出
+          ChatModel bean；一并去掉可以少一条「到底谁在发请求」的歧义。
+        -->
 
         <dependency>
             <groupId>org.springframework.boot</groupId>

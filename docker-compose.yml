@@ -53,8 +53,19 @@ services:
       DB_USER: ${DB_USER:-chess}
       DB_PASSWORD: ${DB_PASSWORD:?请在 .env 里设置 DB_PASSWORD}
       DB_POOL_SIZE: ${DB_POOL_SIZE:-8}
-      # 留空则 AI 教练降级为本地提示，下棋和引擎复盘不受影响
+      # 大模型：deepseek（默认，用下面 DeepSeek 的 key）| dashscope（百炼）| none（不用大模型）
+      # 留空对应厂商的 key 时，AI 教练自动降级为本地提示，下棋和引擎复盘不受影响
+      COACH_PROVIDER: ${COACH_PROVIDER:-deepseek}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-flash}
       DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+      # 大模型 HTTP 超时。读超时必须大于模型的首字延迟，否则慢响应会被误判成调用失败
+      # （见 config/LlmHttpClientConfig）。讲解是流式的，应用层的超时分两层：
+      # COACH_TIMEOUT_MS 管「两段之间最多停顿多久」，COACH_STREAM_MAX_MS 管一整条流的最长时长。
+      COACH_HTTP_READ_TIMEOUT_MS: ${COACH_HTTP_READ_TIMEOUT_MS:-120000}
+      COACH_HTTP_CONNECT_TIMEOUT_MS: ${COACH_HTTP_CONNECT_TIMEOUT_MS:-10000}
+      COACH_TIMEOUT_MS: ${COACH_TIMEOUT_MS:-40000}
+      COACH_STREAM_MAX_MS: ${COACH_STREAM_MAX_MS:-180000}
       ENGINE_PATH: /opt/engine
       ENGINE_EXE: Pikafish-Linux-x86-64-universal
       ENGINE_NNUE: pikafish.nnue
